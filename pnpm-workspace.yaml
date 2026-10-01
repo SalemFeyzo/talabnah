@@ -1,0 +1,13 @@
+# pnpm-workspace.yaml
+packages:
+  - "."
+
+overrides:
+  "@react-native/metro-config": "0.87.1"
+  uuid: "^11.0.0"
+
+peerDependencyRules:
+  allowAny:
+    - "@react-native/metro-config"
+  ignoreMissing:
+    - "@react-native/metro-config"
