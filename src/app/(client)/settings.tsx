@@ -24,7 +24,7 @@ export default function ClientSettingsScreen() {
   const [phone, setPhone] = useState(profile?.phone || "");
   const [updatingProfile, setUpdatingProfile] = useState(false);
 
-  // حالات الإعدادات
+  // حالات الإعدادات والتفضيلات
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const [savingPassword, setSavingPassword] = useState(false);
 
@@ -96,16 +96,24 @@ export default function ClientSettingsScreen() {
     );
   };
 
-  // تسجيل الخروج
-  const handleSignOut = async () => {
-    Alert.alert("تسجيل الخروج", "هل أنت تأكد من رغبتك في تسجيل الخروج؟", [
+  // تسجيل الخروج المضمون
+  const handleSignOut = () => {
+    Alert.alert("تسجيل الخروج", "هل أنت متأكد من رغبتك في تسجيل الخروج؟", [
       { text: "إلغاء", style: "cancel" },
       {
         text: "خروج",
         style: "destructive",
         onPress: async () => {
-          await signOut();
-          router.replace("/(auth)/login");
+          try {
+            await supabase.auth.signOut();
+            if (signOut) {
+              await signOut();
+            }
+          } catch (error) {
+            console.error("Signout error:", error);
+          } finally {
+            router.replace("/(auth)/login");
+          }
         },
       },
     ]);
@@ -119,7 +127,7 @@ export default function ClientSettingsScreen() {
       {/* العنوان الرئيسي */}
       <Text style={styles.headerTitle}>إعدادات الحساب</Text>
 
-      {/* قسم البيانات الشخصية */}
+      {/* 1. قسم البيانات الشخصية */}
       <View style={styles.card}>
         <View style={styles.profileHeader}>
           <View style={styles.avatar}>
@@ -169,6 +177,7 @@ export default function ClientSettingsScreen() {
           onPress={handleUpdateProfile}
           disabled={updatingProfile}
           style={styles.primaryButton}
+          activeOpacity={0.8}
         >
           {updatingProfile ? (
             <ActivityIndicator color="#fff" />
@@ -178,7 +187,7 @@ export default function ClientSettingsScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* قسم تحويل الحساب وإنشاء المتجر */}
+      {/* 2. قسم ترقية الحساب وإنشاء المتجر */}
       <View style={styles.card}>
         <Text style={styles.cardTitle}>ترقية الحساب والأنشطة</Text>
         <Text style={styles.cardSubTitle}>
@@ -188,6 +197,7 @@ export default function ClientSettingsScreen() {
         <TouchableOpacity
           onPress={() => router.push("/(merchant)/setup-store")}
           style={[styles.actionRow, styles.merchantBg]}
+          activeOpacity={0.7}
         >
           <View style={styles.actionRight}>
             <View style={[styles.iconBox, styles.merchantIconBox]}>
@@ -210,6 +220,7 @@ export default function ClientSettingsScreen() {
             Alert.alert("قريباً", "سيتم إتاحة التسجيل لمندوبي التوصيل قريباً")
           }
           style={[styles.actionRow, styles.driverBg]}
+          activeOpacity={0.7}
         >
           <View style={styles.actionRight}>
             <View style={[styles.iconBox, styles.driverIconBox]}>
@@ -226,7 +237,7 @@ export default function ClientSettingsScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* قسم التفضيلات والأمان */}
+      {/* 3. قسم التفضيلات والأمان */}
       <View style={styles.card}>
         <Text style={styles.cardTitle}>التفضيلات والأمان</Text>
 
@@ -246,6 +257,7 @@ export default function ClientSettingsScreen() {
           onPress={handleResetPassword}
           disabled={savingPassword}
           style={styles.settingRow}
+          activeOpacity={0.6}
         >
           <View style={styles.settingRight}>
             <Ionicons name="lock-closed-outline" size={20} color="#4b5563" />
@@ -259,8 +271,12 @@ export default function ClientSettingsScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* زر تسجيل الخروج */}
-      <TouchableOpacity onPress={handleSignOut} style={styles.signOutButton}>
+      {/* 4. زر تسجيل الخروج */}
+      <TouchableOpacity
+        onPress={handleSignOut}
+        style={styles.signOutButton}
+        activeOpacity={0.8}
+      >
         <Ionicons name="log-out-outline" size={20} color="#dc2626" />
         <Text style={styles.signOutText}>تسجيل الخروج</Text>
       </TouchableOpacity>
