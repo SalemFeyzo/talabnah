@@ -65,7 +65,7 @@ export default function LoginScreen() {
           <View style={styles.logoCircle}>
             <Ionicons name="basket" size={56} color={Colors.gold.main} />
           </View>
-          <Text style={styles.brand}>طلبنا</Text>
+          <Text style={styles.brand}>طلبناه</Text>
           <Text style={styles.brandLatin}>TALABNAH</Text>
           <Text style={styles.tagline}>كل احتياجاتك.. في مكان واحد</Text>
         </View>
@@ -153,7 +153,7 @@ export default function LoginScreen() {
           </View>
         </View>
 
-        <Text style={styles.bottomText}>طلبنا — معك في كل طريق 🛒</Text>
+        <Text style={styles.bottomText}>طلبناه — معك في كل طريق 🛒</Text>
       </ScrollView>
     </KeyboardAvoidingView>
   );

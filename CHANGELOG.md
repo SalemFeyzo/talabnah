@@ -1,6 +1,6 @@
 # Changelog
 
-جميع التغييرات المهمة في مشروع **طلبنا (Talabnah)** موثقة هنا.
+جميع التغييرات المهمة في مشروع **طلبناه (Talabnah)** موثقة هنا.
 التنسيق مبني على [Keep a Changelog](https://keepachangelog.com/)، والمشروع يتبع [Semantic Versioning](https://semver.org/).
 
 ---
@@ -146,7 +146,7 @@
 ### ✨ Added — شاشات المصادقة `(auth)`
 
 - **`_layout.tsx`** — Redirect حسب role + viewMode مع فحص صلاحيات
-- **`login.tsx`** — تصميم جديد بهوية طلبنا (خلفية خضراء + شعار ذهبي)
+- **`login.tsx`** — تصميم جديد بهوية طلبناه (خلفية خضراء + شعار ذهبي)
 - **`register.tsx`** — تصميم جديد + Terms
 
 ### ✨ Added — شاشة التوجيه الذكية
@@ -183,7 +183,7 @@
 ### 🎨 Changed
 
 - استبدال كامل لـ `NativeWind` بـ `StyleSheet.create` (لضمان ظهور التنسيقات على كل المنصات)
-- إعادة تصميم شاشات المصادقة (Login, Register) بهوية طلبنا
+- إعادة تصميم شاشات المصادقة (Login, Register) بهوية طلبناه
 - إعادة تصميم `settings.tsx` (بطاقة بروفايل + أقسام منظمة + زر تبديل بارز)
 - تحويل `(client)/_layout.tsx` من 3 تبويبات إلى 5 (index, categories, cart, orders, settings)
 - تحديث `merchantService` — دمج `updateStore` مع `updated_at` تلقائي (يُدار بواسطة Trigger)

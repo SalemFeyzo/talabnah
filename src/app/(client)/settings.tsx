@@ -307,7 +307,7 @@ export default function ClientSettingsScreen() {
           <Text style={styles.signOutText}>تسجيل الخروج</Text>
         </Pressable>
 
-        <Text style={styles.version}>طلبنا v0.0.1</Text>
+        <Text style={styles.version}>طلبناه v0.0.1</Text>
       </ScrollView>
     </ScreenContainer>
   );

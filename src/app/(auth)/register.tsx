@@ -99,13 +99,13 @@ export default function RegisterScreen() {
           <View style={styles.logoCircle}>
             <Ionicons name="basket" size={48} color={Colors.gold.main} />
           </View>
-          <Text style={styles.brand}>طلبنا</Text>
-          <Text style={styles.tagline}>انضم إلى عائلة طلبنا</Text>
+          <Text style={styles.brand}>طلبناه</Text>
+          <Text style={styles.tagline}>انضم إلى عائلة طلبناه</Text>
         </View>
 
         <View style={styles.card}>
           <Text style={styles.cardTitle}>حساب جديد</Text>
-          <Text style={styles.cardSub}>ابدأ رحلتك مع طلبنا في دقيقة واحدة</Text>
+          <Text style={styles.cardSub}>ابدأ رحلتك مع طلبناه في دقيقة واحدة</Text>
 
           <InputField
             icon="person-outline"
