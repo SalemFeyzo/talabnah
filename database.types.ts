@@ -14,6 +14,77 @@ export type Database = {
   }
   public: {
     Tables: {
+      addresses: {
+        Row: {
+          address_line: string
+          client_id: string
+          created_at: string
+          details: string | null
+          id: string
+          is_default: boolean
+          label: string
+          latitude: number | null
+          longitude: number | null
+        }
+        Insert: {
+          address_line: string
+          client_id: string
+          created_at?: string
+          details?: string | null
+          id?: string
+          is_default?: boolean
+          label?: string
+          latitude?: number | null
+          longitude?: number | null
+        }
+        Update: {
+          address_line?: string
+          client_id?: string
+          created_at?: string
+          details?: string | null
+          id?: string
+          is_default?: boolean
+          label?: string
+          latitude?: number | null
+          longitude?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "addresses_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      categories: {
+        Row: {
+          created_at: string
+          icon: string | null
+          id: string
+          image_url: string | null
+          name: string
+          sort_order: number
+        }
+        Insert: {
+          created_at?: string
+          icon?: string | null
+          id?: string
+          image_url?: string | null
+          name: string
+          sort_order?: number
+        }
+        Update: {
+          created_at?: string
+          icon?: string | null
+          id?: string
+          image_url?: string | null
+          name?: string
+          sort_order?: number
+        }
+        Relationships: []
+      }
       drivers: {
         Row: {
           created_at: string
@@ -94,6 +165,7 @@ export type Database = {
       merchants: {
         Row: {
           address: string | null
+          category_id: string | null
           created_at: string
           id: string
           is_active: boolean
@@ -104,6 +176,7 @@ export type Database = {
         }
         Insert: {
           address?: string | null
+          category_id?: string | null
           created_at?: string
           id?: string
           is_active?: boolean
@@ -114,6 +187,7 @@ export type Database = {
         }
         Update: {
           address?: string | null
+          category_id?: string | null
           created_at?: string
           id?: string
           is_active?: boolean
@@ -124,6 +198,13 @@ export type Database = {
         }
         Relationships: [
           {
+            foreignKeyName: "merchants_category_id_fkey"
+            columns: ["category_id"]
+            isOneToOne: false
+            referencedRelation: "categories"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "merchants_owner_id_fkey"
             columns: ["owner_id"]
             isOneToOne: true
@@ -132,38 +213,141 @@ export type Database = {
           },
         ]
       }
+      order_items: {
+        Row: {
+          created_at: string
+          id: string
+          order_id: string
+          product_id: string
+          product_name: string
+          quantity: number
+          unit_price: number
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          order_id: string
+          product_id: string
+          product_name: string
+          quantity: number
+          unit_price: number
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          order_id?: string
+          product_id?: string
+          product_name?: string
+          quantity?: number
+          unit_price?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "order_items_order_id_fkey"
+            columns: ["order_id"]
+            isOneToOne: false
+            referencedRelation: "orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "order_items_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      order_status_history: {
+        Row: {
+          changed_by: string | null
+          created_at: string
+          id: string
+          note: string | null
+          order_id: string
+          status: Database["public"]["Enums"]["order_status"]
+        }
+        Insert: {
+          changed_by?: string | null
+          created_at?: string
+          id?: string
+          note?: string | null
+          order_id: string
+          status: Database["public"]["Enums"]["order_status"]
+        }
+        Update: {
+          changed_by?: string | null
+          created_at?: string
+          id?: string
+          note?: string | null
+          order_id?: string
+          status?: Database["public"]["Enums"]["order_status"]
+        }
+        Relationships: [
+          {
+            foreignKeyName: "order_status_history_changed_by_fkey"
+            columns: ["changed_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "order_status_history_order_id_fkey"
+            columns: ["order_id"]
+            isOneToOne: false
+            referencedRelation: "orders"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       orders: {
         Row: {
+          address_id: string | null
           client_id: string
           created_at: string
+          delivery_fee: number
           driver_id: string | null
           id: string
           merchant_id: string
+          notes: string | null
           status: Database["public"]["Enums"]["order_status"]
           total_amount: number
           updated_at: string
         }
         Insert: {
+          address_id?: string | null
           client_id: string
           created_at?: string
+          delivery_fee?: number
           driver_id?: string | null
           id?: string
           merchant_id: string
+          notes?: string | null
           status?: Database["public"]["Enums"]["order_status"]
           total_amount: number
           updated_at?: string
         }
         Update: {
+          address_id?: string | null
           client_id?: string
           created_at?: string
+          delivery_fee?: number
           driver_id?: string | null
           id?: string
           merchant_id?: string
+          notes?: string | null
           status?: Database["public"]["Enums"]["order_status"]
           total_amount?: number
           updated_at?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "orders_address_id_fkey"
+            columns: ["address_id"]
+            isOneToOne: false
+            referencedRelation: "addresses"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "orders_client_id_fkey"
             columns: ["client_id"]
@@ -189,6 +373,7 @@ export type Database = {
       }
       products: {
         Row: {
+          category_id: string | null
           created_at: string
           description: string | null
           id: string
@@ -200,6 +385,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          category_id?: string | null
           created_at?: string
           description?: string | null
           id?: string
@@ -211,6 +397,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          category_id?: string | null
           created_at?: string
           description?: string | null
           id?: string
@@ -222,6 +409,13 @@ export type Database = {
           updated_at?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "products_category_id_fkey"
+            columns: ["category_id"]
+            isOneToOne: false
+            referencedRelation: "categories"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "products_merchant_id_fkey"
             columns: ["merchant_id"]
@@ -295,7 +489,12 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      get_my_role: {
+        Args: never
+        Returns: Database["public"]["Enums"]["user_role"]
+      }
+      is_admin: { Args: never; Returns: boolean }
+      is_merchant_owner: { Args: { m_id: string }; Returns: boolean }
     }
     Enums: {
       order_status:

@@ -1,467 +1,485 @@
-import { useAuth } from "@/context/AuthContext";
-import { supabase } from "@/utils/supabase";
+// src/app/(client)/settings.tsx
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import { useState } from "react";
+import React, { useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
+  Pressable,
   ScrollView,
   StyleSheet,
   Switch,
   Text,
-  TextInput,
-  TouchableOpacity,
   View,
 } from "react-native";
+
+import { ScreenContainer } from "@/components/layout";
+import { AppButton, AppInput } from "@/components/ui";
+import { Colors } from "@/constants/colors";
+import { Radius, Shadow, Spacing } from "@/constants/spacing";
+import { FontSize, FontWeight } from "@/constants/typography";
+import { useAuth } from "@/context/AuthContext";
+import { useViewMode } from "@/context/ViewModeContext";
+import { merchantService } from "@/services/merchant";
+import { showAlert, showConfirm } from "@/utils/confirm";
+import { supabase } from "@/utils/supabase";
 
 export default function ClientSettingsScreen() {
   const router = useRouter();
   const { user, profile, refreshProfile, signOut } = useAuth();
+  const { setViewMode } = useViewMode();
 
-  // حالات البيانات الشخصية
-  const [fullName, setFullName] = useState(profile?.full_name || "");
-  const [phone, setPhone] = useState(profile?.phone || "");
-  const [updatingProfile, setUpdatingProfile] = useState(false);
+  const [fullName, setFullName] = useState(profile?.full_name ?? "");
+  const [phone, setPhone] = useState(profile?.phone ?? "");
+  const [saving, setSaving] = useState(false);
+  const [notifications, setNotifications] = useState(true);
+  const [switching, setSwitching] = useState(false);
 
-  // حالات الإعدادات والتفضيلات
-  const [notificationsEnabled, setNotificationsEnabled] = useState(true);
-  const [savingPassword, setSavingPassword] = useState(false);
-
-  // تحديث البيانات الشخصية
-  const handleUpdateProfile = async () => {
-    if (!user?.id) {
-      Alert.alert("خطأ", "لم يتم العثور على بيانات الجلسة الحالية");
-      return;
-    }
-
+  // ============ حفظ البيانات الشخصية ============
+  const handleUpdate = async () => {
+    if (!user?.id) return;
     if (!fullName.trim()) {
-      Alert.alert("تنبيه", "يرجى إدخال الاسم الكامل");
+      showAlert("تنبيه", "أدخل الاسم الكامل");
       return;
     }
-
+    setSaving(true);
     try {
-      setUpdatingProfile(true);
       const { error } = await supabase
         .from("profiles")
         .update({
           full_name: fullName.trim(),
           phone: phone.trim(),
-          updated_at: new Date().toISOString(),
         })
         .eq("id", user.id);
-
       if (error) throw error;
-
-      if (refreshProfile) await refreshProfile();
-      Alert.alert("نجاح", "تم تحديث البيانات الشخصية بنجاح");
-    } catch (error: any) {
-      console.error("Error updating profile:", error);
-      Alert.alert("خطأ", error.message || "فشل في تحديث البيانات");
+      await refreshProfile();
+      showAlert("✅", "تم تحديث البيانات");
+    } catch (e: any) {
+      showAlert("خطأ", e?.message ?? "تعذّر التحديث");
     } finally {
-      setUpdatingProfile(false);
+      setSaving(false);
     }
   };
 
-  // إعادة ضبط كلمة المرور عبر البريد
-  const handleResetPassword = async () => {
-    if (!user?.email) return;
+  // ============ التبديل إلى تاجر ============
+  const handleSwitchToMerchant = async () => {
+    if (!user?.id) return;
+    setSwitching(true);
+    try {
+      const merchant = await merchantService.getMyMerchant(user.id);
 
-    Alert.alert(
-      "تأكيد",
-      `هل ترغب في إرسال رابط إعادة تعيين كلمة المرور إلى البريد:\n${user.email}؟`,
-      [
-        { text: "إلغاء", style: "cancel" },
-        {
-          text: "إرسال",
-          onPress: async () => {
-            try {
-              setSavingPassword(true);
-              const { error } = await supabase.auth.resetPasswordForEmail(
-                user.email!,
-              );
-              if (error) throw error;
-              Alert.alert(
-                "نجاح",
-                "تم إرسال رابط تغيير كلمة المرور إلى بريدك الإلكتروني",
-              );
-            } catch (error: any) {
-              Alert.alert("خطأ", error.message);
-            } finally {
-              setSavingPassword(false);
-            }
-          },
-        },
-      ],
+      if (merchant) {
+        await merchantService.promoteToMerchant(user.id);
+        await refreshProfile();
+        await setViewMode("merchant");
+        router.replace("/(merchant)");
+      } else {
+        router.push("/(merchant)/setup-store" as any);
+      }
+    } catch (e: any) {
+      console.error("Switch to merchant:", e);
+      showAlert("خطأ", e?.message ?? "تعذّر التبديل");
+    } finally {
+      setSwitching(false);
+    }
+  };
+
+  // ============ تسجيل الخروج ============
+  const performSignOut = async () => {
+    try {
+      await signOut();
+    } catch (e) {
+      console.error("SignOut error:", e);
+    } finally {
+      router.replace("/(auth)/login");
+    }
+  };
+
+  const handleSignOut = () => {
+    showConfirm(
+      "تسجيل الخروج",
+      "هل أنت متأكد من رغبتك في تسجيل الخروج؟",
+      performSignOut,
+      "خروج",
     );
   };
 
-  // تسجيل الخروج المضمون
-  const handleSignOut = () => {
-    Alert.alert("تسجيل الخروج", "هل أنت متأكد من رغبتك في تسجيل الخروج؟", [
-      { text: "إلغاء", style: "cancel" },
-      {
-        text: "خروج",
-        style: "destructive",
-        onPress: async () => {
-          try {
-            await supabase.auth.signOut();
-            if (signOut) {
-              await signOut();
-            }
-          } catch (error) {
-            console.error("Signout error:", error);
-          } finally {
-            router.replace("/(auth)/login");
-          }
-        },
+  // ============ إعادة تعيين كلمة المرور ============
+  const handleResetPassword = () => {
+    if (!user?.email) return;
+    showConfirm(
+      "تغيير كلمة المرور",
+      `سيتم إرسال رابط إلى:\n${user.email}`,
+      async () => {
+        try {
+          const { error } = await supabase.auth.resetPasswordForEmail(
+            user.email!,
+          );
+          if (error) throw error;
+          showAlert("✅", "تم إرسال رابط التغيير إلى بريدك");
+        } catch (e: any) {
+          showAlert("خطأ", e?.message ?? "تعذّر الإرسال");
+        }
       },
-    ]);
+      "إرسال",
+    );
   };
 
+  const avatarLetter =
+    fullName?.charAt(0).toUpperCase() ||
+    user?.email?.charAt(0).toUpperCase() ||
+    "؟";
+
   return (
-    <ScrollView
-      style={styles.container}
-      contentContainerStyle={styles.scrollContent}
-    >
-      {/* العنوان الرئيسي */}
-      <Text style={styles.headerTitle}>إعدادات الحساب</Text>
+    <ScreenContainer scroll={false} padded={false} edges={["top"]}>
+      <ScrollView
+        contentContainerStyle={styles.scroll}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Header */}
+        <View style={styles.header}>
+          <Text style={styles.title}>حسابي</Text>
+          <Pressable style={styles.iconBtn}>
+            <Ionicons
+              name="settings-outline"
+              size={20}
+              color={Colors.primary.main}
+            />
+          </Pressable>
+        </View>
 
-      {/* 1. قسم البيانات الشخصية */}
-      <View style={styles.card}>
-        <View style={styles.profileHeader}>
+        {/* Profile Card */}
+        <View style={styles.profileCard}>
           <View style={styles.avatar}>
-            <Text style={styles.avatarText}>
-              {fullName ? fullName.charAt(0).toUpperCase() : "U"}
-            </Text>
+            <Text style={styles.avatarText}>{avatarLetter}</Text>
           </View>
-          <View>
-            <Text style={styles.cardTitle}>البيانات الشخصية</Text>
-            <Text style={styles.cardSubTitle}>
-              إدارة اسم المستخدم وتفاصيل التواصل
-            </Text>
-          </View>
+          <Text style={styles.profileName}>{fullName || "مستخدم"}</Text>
+          <Text style={styles.profileEmail}>{user?.email}</Text>
         </View>
 
-        <View style={styles.inputGroup}>
-          <Text style={styles.label}>البريد الإلكتروني</Text>
-          <TextInput
-            value={user?.email || ""}
+        {/* Personal Data */}
+        <SectionCard title="البيانات الشخصية" icon="person-outline">
+          <AppInput
+            label="البريد الإلكتروني"
+            value={user?.email ?? ""}
             editable={false}
-            style={[styles.input, styles.disabledInput]}
+            containerStyle={{ marginBottom: Spacing.sm }}
           />
-        </View>
-
-        <View style={styles.inputGroup}>
-          <Text style={styles.label}>الاسم الكامل</Text>
-          <TextInput
+          <AppInput
+            label="الاسم الكامل"
             value={fullName}
             onChangeText={setFullName}
-            placeholder="أدخل اسمك الكامل"
-            style={styles.input}
+            placeholder="أدخل اسمك"
           />
-        </View>
-
-        <View style={styles.inputGroup}>
-          <Text style={styles.label}>رقم الهاتف</Text>
-          <TextInput
+          <AppInput
+            label="رقم الهاتف"
             value={phone}
             onChangeText={setPhone}
             placeholder="09XXXXXXXX"
             keyboardType="phone-pad"
-            style={styles.input}
           />
-        </View>
-
-        <TouchableOpacity
-          onPress={handleUpdateProfile}
-          disabled={updatingProfile}
-          style={styles.primaryButton}
-          activeOpacity={0.8}
-        >
-          {updatingProfile ? (
-            <ActivityIndicator color="#fff" />
-          ) : (
-            <Text style={styles.primaryButtonText}>حفظ التغييرات</Text>
-          )}
-        </TouchableOpacity>
-      </View>
-
-      {/* 2. قسم ترقية الحساب وإنشاء المتجر */}
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>ترقية الحساب والأنشطة</Text>
-        <Text style={styles.cardSubTitle}>
-          ابدأ البيع أو التوصيل عبر المنصة
-        </Text>
-
-        <TouchableOpacity
-          onPress={() => router.push("/(merchant)/setup-store")}
-          style={[styles.actionRow, styles.merchantBg]}
-          activeOpacity={0.7}
-        >
-          <View style={styles.actionRight}>
-            <View style={[styles.iconBox, styles.merchantIconBox]}>
-              <Ionicons name="storefront-outline" size={20} color="#2563eb" />
-            </View>
-            <View>
-              <Text style={styles.actionTitle}>
-                إنشاء متجر جديد / التحويل لتاجر
-              </Text>
-              <Text style={styles.actionSubTitle}>
-                عرض المنتجات وإدارة الطلبات
-              </Text>
-            </View>
-          </View>
-          <Ionicons name="chevron-back" size={18} color="#2563eb" />
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          onPress={() =>
-            Alert.alert("قريباً", "سيتم إتاحة التسجيل لمندوبي التوصيل قريباً")
-          }
-          style={[styles.actionRow, styles.driverBg]}
-          activeOpacity={0.7}
-        >
-          <View style={styles.actionRight}>
-            <View style={[styles.iconBox, styles.driverIconBox]}>
-              <Ionicons name="bicycle-outline" size={20} color="#d97706" />
-            </View>
-            <View>
-              <Text style={styles.actionTitle}>الانضمام كـ كابتن توصيل</Text>
-              <Text style={styles.actionSubTitle}>
-                توصيل الطلبات وتحقيق دخل إضافي
-              </Text>
-            </View>
-          </View>
-          <Ionicons name="chevron-back" size={18} color="#d97706" />
-        </TouchableOpacity>
-      </View>
-
-      {/* 3. قسم التفضيلات والأمان */}
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>التفضيلات والأمان</Text>
-
-        <View style={styles.settingRow}>
-          <View style={styles.settingRight}>
-            <Ionicons name="notifications-outline" size={20} color="#4b5563" />
-            <Text style={styles.settingText}>تفعيل التنبيهات</Text>
-          </View>
-          <Switch
-            value={notificationsEnabled}
-            onValueChange={setNotificationsEnabled}
-            trackColor={{ false: "#d1d5db", true: "#2563eb" }}
+          <AppButton
+            label={saving ? "جاري الحفظ..." : "حفظ التغييرات"}
+            onPress={handleUpdate}
+            loading={saving}
+            disabled={saving}
+            variant="primary"
+            fullWidth
           />
-        </View>
+        </SectionCard>
 
-        <TouchableOpacity
-          onPress={handleResetPassword}
-          disabled={savingPassword}
-          style={styles.settingRow}
-          activeOpacity={0.6}
-        >
-          <View style={styles.settingRight}>
-            <Ionicons name="lock-closed-outline" size={20} color="#4b5563" />
-            <Text style={styles.settingText}>تغيير كلمة المرور</Text>
+        {/* Merchant Switch */}
+        <SectionCard title="الأنشطة التجارية" icon="storefront-outline">
+          <Pressable
+            onPress={handleSwitchToMerchant}
+            disabled={switching}
+            style={({ pressed }) => [
+              styles.actionRow,
+              pressed && styles.pressed,
+            ]}
+          >
+            <View style={styles.actionIconBox}>
+              {switching ? (
+                <ActivityIndicator color={Colors.gold.dark} />
+              ) : (
+                <Ionicons
+                  name="storefront"
+                  size={20}
+                  color={Colors.gold.dark}
+                />
+              )}
+            </View>
+            <View style={{ flex: 1, alignItems: "flex-end" }}>
+              <Text style={styles.actionTitle}>التبديل إلى التاجر</Text>
+              <Text style={styles.actionSub}>إدارة متجرك ومنتجاتك وطلباتك</Text>
+            </View>
+            <Ionicons name="chevron-back" size={18} color={Colors.gold.dark} />
+          </Pressable>
+
+          <Pressable
+            onPress={() => showAlert("قريباً", "التسجيل كمندوب توصيل قريباً")}
+            style={({ pressed }) => [
+              styles.actionRow,
+              pressed && styles.pressed,
+            ]}
+          >
+            <View
+              style={[styles.actionIconBox, { backgroundColor: "#FEF3C720" }]}
+            >
+              <Ionicons name="bicycle" size={20} color="#D97706" />
+            </View>
+            <View style={{ flex: 1, alignItems: "flex-end" }}>
+              <Text style={styles.actionTitle}>الانضمام كمندوب توصيل</Text>
+              <Text style={styles.actionSub}>قريباً</Text>
+            </View>
+            <Ionicons name="chevron-back" size={18} color="#D97706" />
+          </Pressable>
+        </SectionCard>
+
+        {/* Preferences */}
+        <SectionCard title="التفضيلات والأمان" icon="shield-checkmark-outline">
+          <View style={styles.settingRow}>
+            <Switch
+              value={notifications}
+              onValueChange={setNotifications}
+              trackColor={{
+                false: Colors.gray[300],
+                true: Colors.primary.main,
+              }}
+              thumbColor="#fff"
+            />
+            <View style={styles.settingLeft}>
+              <Ionicons
+                name="notifications-outline"
+                size={18}
+                color={Colors.text.secondary}
+              />
+              <Text style={styles.settingText}>تفعيل التنبيهات</Text>
+            </View>
           </View>
-          {savingPassword ? (
-            <ActivityIndicator size="small" color="#2563eb" />
-          ) : (
-            <Ionicons name="chevron-back" size={18} color="#9ca3af" />
-          )}
-        </TouchableOpacity>
-      </View>
 
-      {/* 4. زر تسجيل الخروج */}
-      <TouchableOpacity
-        onPress={handleSignOut}
-        style={styles.signOutButton}
-        activeOpacity={0.8}
-      >
-        <Ionicons name="log-out-outline" size={20} color="#dc2626" />
-        <Text style={styles.signOutText}>تسجيل الخروج</Text>
-      </TouchableOpacity>
-    </ScrollView>
+          <Pressable
+            onPress={handleResetPassword}
+            style={({ pressed }) => [
+              styles.settingRow,
+              pressed && styles.pressed,
+            ]}
+          >
+            <Ionicons name="chevron-back" size={18} color={Colors.text.muted} />
+            <View style={styles.settingLeft}>
+              <Ionicons
+                name="lock-closed-outline"
+                size={18}
+                color={Colors.text.secondary}
+              />
+              <Text style={styles.settingText}>تغيير كلمة المرور</Text>
+            </View>
+          </Pressable>
+
+          <Pressable
+            onPress={() => showAlert("قريباً", "الدعم الفني قريباً")}
+            style={({ pressed }) => [
+              styles.settingRow,
+              pressed && styles.pressed,
+            ]}
+          >
+            <Ionicons name="chevron-back" size={18} color={Colors.text.muted} />
+            <View style={styles.settingLeft}>
+              <Ionicons
+                name="help-circle-outline"
+                size={18}
+                color={Colors.text.secondary}
+              />
+              <Text style={styles.settingText}>المساعدة والدعم</Text>
+            </View>
+          </Pressable>
+        </SectionCard>
+
+        {/* Sign Out */}
+        <Pressable
+          onPress={handleSignOut}
+          style={({ pressed }) => [styles.signOut, pressed && styles.pressed]}
+        >
+          <Ionicons
+            name="log-out-outline"
+            size={20}
+            color={Colors.status.error}
+          />
+          <Text style={styles.signOutText}>تسجيل الخروج</Text>
+        </Pressable>
+
+        <Text style={styles.version}>طلبنا v0.0.1</Text>
+      </ScrollView>
+    </ScreenContainer>
+  );
+}
+
+function SectionCard({
+  title,
+  icon,
+  children,
+}: {
+  title: string;
+  icon: any;
+  children: React.ReactNode;
+}) {
+  return (
+    <View style={styles.section}>
+      <View style={styles.sectionHeader}>
+        <Ionicons name={icon} size={18} color={Colors.primary.main} />
+        <Text style={styles.sectionTitle}>{title}</Text>
+      </View>
+      <View style={styles.sectionBody}>{children}</View>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#f9fafb",
-  },
-  scrollContent: {
-    paddingHorizontal: 16,
-    paddingTop: 48,
-    paddingBottom: 40,
-  },
-  headerTitle: {
-    fontSize: 24,
-    fontWeight: "700",
-    color: "#1f2937",
-    textAlign: "right",
-    marginBottom: 20,
-  },
-  card: {
-    backgroundColor: "#ffffff",
-    borderRadius: 20,
-    padding: 16,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: "#f3f4f6",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 3,
-    elevation: 2,
-  },
-  profileHeader: {
+  scroll: { padding: Spacing.lg, paddingBottom: 60 },
+  header: {
     flexDirection: "row-reverse",
     alignItems: "center",
-    marginBottom: 16,
+    justifyContent: "space-between",
+    marginBottom: Spacing.lg,
+  },
+  title: {
+    fontSize: FontSize.xxl,
+    fontWeight: FontWeight.bold,
+    color: Colors.text.primary,
+  },
+  iconBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: Radius.md,
+    backgroundColor: Colors.primary.soft,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  profileCard: {
+    alignItems: "center",
+    backgroundColor: Colors.primary.main,
+    borderRadius: Radius.xl,
+    padding: Spacing.xl,
+    marginBottom: Spacing.lg,
+    ...Shadow.md,
   },
   avatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: "#dbeafe",
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: Colors.gold.main,
     alignItems: "center",
     justifyContent: "center",
-    marginLeft: 12,
+    marginBottom: Spacing.md,
+    borderWidth: 3,
+    borderColor: "#fff",
   },
   avatarText: {
-    color: "#2563eb",
-    fontWeight: "700",
-    fontSize: 20,
+    fontSize: 32,
+    fontWeight: FontWeight.bold,
+    color: Colors.primary.dark,
   },
-  cardTitle: {
-    fontSize: 16,
-    fontWeight: "700",
-    color: "#1f2937",
-    textAlign: "right",
+  profileName: {
+    fontSize: FontSize.lg,
+    fontWeight: FontWeight.bold,
+    color: "#fff",
+    textAlign: "center",
   },
-  cardSubTitle: {
-    fontSize: 12,
-    color: "#9ca3af",
-    textAlign: "right",
-    marginTop: 2,
+  profileEmail: {
+    fontSize: FontSize.sm,
+    color: Colors.primary.soft,
+    marginTop: 4,
   },
-  inputGroup: {
-    marginBottom: 12,
-  },
-  label: {
-    fontSize: 12,
-    fontWeight: "600",
-    color: "#4b5563",
-    textAlign: "right",
-    marginBottom: 6,
-  },
-  input: {
-    backgroundColor: "#f9fafb",
-    borderWidth: 1,
-    borderColor: "#e5e7eb",
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    fontSize: 14,
-    color: "#1f2937",
-    textAlign: "right",
-  },
-  disabledInput: {
-    backgroundColor: "#f3f4f6",
-    color: "#9ca3af",
-  },
-  primaryButton: {
-    backgroundColor: "#2563eb",
-    borderRadius: 12,
-    paddingVertical: 14,
+  section: { marginBottom: Spacing.lg },
+  sectionHeader: {
+    flexDirection: "row-reverse",
     alignItems: "center",
-    justifyContent: "center",
-    marginTop: 8,
+    gap: Spacing.sm,
+    marginBottom: Spacing.sm,
+    paddingHorizontal: Spacing.xs,
   },
-  primaryButtonText: {
-    color: "#ffffff",
-    fontSize: 15,
-    fontWeight: "700",
+  sectionTitle: {
+    fontSize: FontSize.md,
+    fontWeight: FontWeight.bold,
+    color: Colors.text.primary,
+  },
+  sectionBody: {
+    backgroundColor: Colors.background.paper,
+    borderRadius: Radius.lg,
+    padding: Spacing.lg,
+    borderWidth: 1,
+    borderColor: Colors.border.light,
+    ...Shadow.sm,
   },
   actionRow: {
     flexDirection: "row-reverse",
-    justifyContent: "space-between",
     alignItems: "center",
-    padding: 12,
-    borderRadius: 16,
-    marginTop: 12,
-    borderWidth: 1,
+    gap: Spacing.md,
+    paddingVertical: Spacing.md,
+    paddingHorizontal: Spacing.sm,
+    borderRadius: Radius.md,
+    backgroundColor: Colors.gold.soft,
+    marginTop: Spacing.sm,
   },
-  merchantBg: {
-    backgroundColor: "#eff6ff",
-    borderColor: "#dbeafe",
-  },
-  driverBg: {
-    backgroundColor: "#fffbeb",
-    borderColor: "#fef3c7",
-  },
-  actionRight: {
-    flexDirection: "row-reverse",
-    alignItems: "center",
-  },
-  iconBox: {
-    width: 38,
-    height: 38,
-    borderRadius: 12,
+  actionIconBox: {
+    width: 40,
+    height: 40,
+    borderRadius: Radius.md,
+    backgroundColor: "rgba(255,255,255,0.5)",
     alignItems: "center",
     justifyContent: "center",
-    marginLeft: 10,
-  },
-  merchantIconBox: {
-    backgroundColor: "rgba(37, 99, 235, 0.1)",
-  },
-  driverIconBox: {
-    backgroundColor: "rgba(217, 119, 6, 0.1)",
   },
   actionTitle: {
-    fontSize: 14,
-    fontWeight: "700",
-    color: "#1f2937",
+    fontSize: FontSize.sm,
+    fontWeight: FontWeight.bold,
+    color: Colors.text.primary,
     textAlign: "right",
   },
-  actionSubTitle: {
-    fontSize: 11,
-    color: "#6b7280",
+  actionSub: {
+    fontSize: FontSize.xs,
+    color: Colors.text.muted,
     textAlign: "right",
+    marginTop: 2,
   },
   settingRow: {
     flexDirection: "row-reverse",
-    justifyContent: "space-between",
     alignItems: "center",
-    paddingVertical: 12,
+    justifyContent: "space-between",
+    paddingVertical: Spacing.md,
     borderBottomWidth: 1,
-    borderBottomColor: "#f3f4f6",
+    borderBottomColor: Colors.border.light,
   },
-  settingRight: {
+  settingLeft: {
     flexDirection: "row-reverse",
     alignItems: "center",
+    gap: Spacing.sm,
   },
   settingText: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: "#374151",
-    marginRight: 8,
+    fontSize: FontSize.sm,
+    fontWeight: FontWeight.semibold,
+    color: Colors.text.primary,
   },
-  signOutButton: {
+  signOut: {
     flexDirection: "row-reverse",
-    justifyContent: "center",
     alignItems: "center",
-    backgroundColor: "#fef2f2",
+    justifyContent: "center",
+    gap: Spacing.sm,
+    paddingVertical: Spacing.lg,
+    borderRadius: Radius.lg,
+    backgroundColor: Colors.status.errorSoft,
     borderWidth: 1,
-    borderColor: "#fecaca",
-    paddingVertical: 14,
-    borderRadius: 16,
-    marginTop: 8,
+    borderColor: Colors.status.error,
+    marginTop: Spacing.md,
   },
   signOutText: {
-    color: "#dc2626",
-    fontWeight: "700",
-    fontSize: 15,
-    marginRight: 8,
+    fontSize: FontSize.md,
+    fontWeight: FontWeight.bold,
+    color: Colors.status.error,
+  },
+  pressed: { opacity: 0.75 },
+  version: {
+    fontSize: FontSize.xs,
+    color: Colors.text.muted,
+    textAlign: "center",
+    marginTop: Spacing.xl,
   },
 });

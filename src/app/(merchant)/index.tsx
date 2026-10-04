@@ -1,190 +1,418 @@
-import { useAuth } from "@/context/AuthContext";
-import { Merchant, merchantService } from "@/services/merchant";
-import { Link } from "expo-router";
-import { useEffect, useState } from "react";
+// src/app/(merchant)/index.tsx
+import { Ionicons } from "@expo/vector-icons";
+import { useRouter } from "expo-router";
+import { useCallback, useEffect, useState } from "react";
 import {
-  ActivityIndicator,
+  Alert,
+  Pressable,
   RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
-  TouchableOpacity,
   View,
 } from "react-native";
 
+import { ScreenContainer } from "@/components/layout";
+import { AppEmptyState, AppLoader } from "@/components/ui";
+import { Colors } from "@/constants/colors";
+import { Radius, Shadow, Spacing } from "@/constants/spacing";
+import { FontSize, FontWeight } from "@/constants/typography";
+import { useAuth } from "@/context/AuthContext";
+import { useViewMode } from "@/context/ViewModeContext";
+import { merchantService } from "@/services/merchant";
+import { orderService } from "@/services/order";
+import type { Merchant } from "@/types";
+
+interface Stats {
+  totalOrders: number;
+  pendingOrders: number;
+  totalRevenue: number;
+  todayOrders: number;
+  todayRevenue: number;
+}
+
 export default function MerchantDashboard() {
-  const { user, profile } = useAuth();
+  const router = useRouter();
+  const { user, refreshProfile } = useAuth();
+  const { setViewMode } = useViewMode();
+
   const [merchant, setMerchant] = useState<Merchant | null>(null);
+  const [stats, setStats] = useState<Stats | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
-  const loadMerchantData = async () => {
-    if (!user) return;
+  const load = useCallback(async () => {
+    if (!user?.id) return;
     try {
-      const data = await merchantService.getMyMerchant(user.id);
-      setMerchant(data);
-    } catch (error) {
-      console.error("Error loading merchant:", error);
+      const m = await merchantService.getMyMerchant(user.id);
+      setMerchant(m);
+      if (m) {
+        const s = await orderService.getMerchantStats(m.id);
+        setStats(s);
+      }
+    } catch (e) {
+      console.error("Dashboard load:", e);
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  };
+  }, [user?.id]);
 
   useEffect(() => {
-    loadMerchantData();
-  }, [user]);
+    load();
+  }, [load]);
+
+  // ============ Realtime subscription ============
+  useEffect(() => {
+    if (!merchant?.id) return;
+
+    let unsub: (() => void) | null = null;
+    let mounted = true;
+
+    const t = setTimeout(() => {
+      if (!mounted) return;
+      unsub = orderService.subscribeMerchantOrders(merchant.id, load);
+    }, 0);
+
+    return () => {
+      mounted = false;
+      clearTimeout(t);
+      unsub?.();
+    };
+  }, [merchant?.id, load]);
 
   const onRefresh = () => {
     setRefreshing(true);
-    loadMerchantData();
+    load();
   };
 
-  if (loading) {
-    return (
-      <View style={styles.centerContainer}>
-        <ActivityIndicator size="large" color="#0284c7" />
-      </View>
-    );
-  }
+  const handleSwitchToClient = async () => {
+    if (!user?.id) return;
+    try {
+      await merchantService.demoteToClient(user.id);
+      await refreshProfile();
+      await setViewMode("client");
+      router.replace("/(client)");
+    } catch (e: any) {
+      console.error("Switch to client:", e);
+      Alert.alert("خطأ", e?.message ?? "تعذّر التبديل");
+    }
+  };
 
-  // إذا لم يكن التاجر قد أنشأ متجراً بعد
+  if (loading) return <AppLoader message="جاري التحميل..." />;
+
   if (!merchant) {
     return (
-      <View style={styles.centerContainer}>
-        <Text style={styles.noStoreTitle}>لم تقم بإنشاء متجر بعد</Text>
-        <Text style={styles.noStoreSubtitle}>
-          ابدأ بإضافة بيانات متجرك لبدء استقبال الطلبات وعرض منتجاتك.
-        </Text>
-
-        <Link href="/(merchant)/setup-store" asChild>
-          <TouchableOpacity style={styles.primaryButton}>
-            <Text style={styles.buttonText}>إنشاء متجر جديد الآن</Text>
-          </TouchableOpacity>
-        </Link>
-      </View>
+      <ScreenContainer edges={["top"]}>
+        <AppEmptyState
+          title="لم تنشئ متجرك بعد"
+          message="أنشئ متجرك الآن وابدأ باستقبال الطلبات."
+          actionLabel="إنشاء متجر جديد"
+          onAction={() => router.push("/(merchant)/setup-store")}
+          icon={
+            <Ionicons
+              name="storefront-outline"
+              size={64}
+              color={Colors.text.muted}
+            />
+          }
+        />
+      </ScreenContainer>
     );
   }
 
   return (
-    <ScrollView
-      style={styles.container}
-      refreshControl={
-        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-      }
+    <ScreenContainer scroll={false} padded={false} edges={["top"]}>
+      <ScrollView
+        contentContainerStyle={{ paddingBottom: 100 }}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+        }
+        showsVerticalScrollIndicator={false}
+      >
+        <View style={styles.header}>
+          <View style={styles.headerLeft}>
+            <Pressable style={styles.iconBtn} onPress={handleSwitchToClient}>
+              <Ionicons
+                name="swap-horizontal"
+                size={20}
+                color={Colors.primary.main}
+              />
+            </Pressable>
+            <Pressable style={styles.iconBtn}>
+              <Ionicons
+                name="notifications-outline"
+                size={20}
+                color={Colors.primary.main}
+              />
+            </Pressable>
+          </View>
+          <View style={{ alignItems: "flex-end", flex: 1 }}>
+            <Text style={styles.hi}>مرحباً بك</Text>
+            <Text style={styles.storeName} numberOfLines={1}>
+              {merchant.store_name}
+            </Text>
+          </View>
+        </View>
+
+        <View style={styles.heroWrap}>
+          <View style={styles.hero}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.heroTitle}>لوحة التاجر</Text>
+              <Text style={styles.heroSub}>
+                {merchant.is_active ? "متجرك نشط الآن" : "متجرك مغلق"}
+              </Text>
+            </View>
+            <Ionicons
+              name="trending-up"
+              size={56}
+              color={Colors.gold.main}
+              style={{ opacity: 0.4 }}
+            />
+          </View>
+        </View>
+
+        <View style={styles.statsGrid}>
+          <StatCard
+            icon="time-outline"
+            label="طلبات معلّقة"
+            value={String(stats?.pendingOrders ?? 0)}
+            color={Colors.status.warning}
+          />
+          <StatCard
+            icon="bag-check-outline"
+            label="طلبات اليوم"
+            value={String(stats?.todayOrders ?? 0)}
+            color={Colors.status.info}
+          />
+          <StatCard
+            icon="cash-outline"
+            label="مبيعات اليوم"
+            value={`${(stats?.todayRevenue ?? 0).toFixed(0)} ل.س`}
+            color={Colors.status.success}
+          />
+          <StatCard
+            icon="analytics-outline"
+            label="إجمالي المبيعات"
+            value={`${(stats?.totalRevenue ?? 0).toFixed(0)} ل.س`}
+            color={Colors.gold.dark}
+          />
+        </View>
+
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>أدوات الإدارة</Text>
+        </View>
+
+        <View style={styles.actions}>
+          <ActionCard
+            icon="cube-outline"
+            title="المنتجات"
+            subtitle="إدارة قائمة منتجاتك"
+            onPress={() => router.push("/(merchant)/products")}
+            color={Colors.primary.main}
+          />
+          <ActionCard
+            icon="receipt-outline"
+            title="الطلبات"
+            subtitle="استعرض طلبات العملاء"
+            onPress={() => router.push("/(merchant)/orders")}
+            color={Colors.gold.dark}
+          />
+          <ActionCard
+            icon="storefront-outline"
+            title="بيانات المتجر"
+            subtitle="تعديل الاسم والشعار"
+            onPress={() => router.push("/(merchant)/setup-store")}
+            color={Colors.status.info}
+          />
+        </View>
+      </ScrollView>
+    </ScreenContainer>
+  );
+}
+
+function StatCard({
+  icon,
+  label,
+  value,
+  color,
+}: {
+  icon: any;
+  label: string;
+  value: string;
+  color: string;
+}) {
+  return (
+    <View style={styles.statCard}>
+      <View style={[styles.statIcon, { backgroundColor: `${color}20` }]}>
+        <Ionicons name={icon} size={20} color={color} />
+      </View>
+      <Text style={styles.statValue} numberOfLines={1}>
+        {value}
+      </Text>
+      <Text style={styles.statLabel} numberOfLines={1}>
+        {label}
+      </Text>
+    </View>
+  );
+}
+
+function ActionCard({
+  icon,
+  title,
+  subtitle,
+  onPress,
+  color,
+}: {
+  icon: any;
+  title: string;
+  subtitle: string;
+  onPress: () => void;
+  color: string;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => [styles.actionCard, pressed && styles.pressed]}
     >
-      {/* بطاقة معلومات المتجر */}
-      <View style={styles.headerCard}>
-        <Text style={styles.storeName}>{merchant.store_name}</Text>
-        <Text style={styles.storeStatus}>
-          حالة المتجر:{" "}
-          {merchant.is_active ? "🟢 نشط ويستقبل الطلبات" : "🔴 مغلق مؤقتاً"}
+      <View style={[styles.actionIcon, { backgroundColor: `${color}20` }]}>
+        <Ionicons name={icon} size={22} color={color} />
+      </View>
+      <View style={{ flex: 1, alignItems: "flex-end" }}>
+        <Text style={styles.actionTitle}>{title}</Text>
+        <Text style={styles.actionSub} numberOfLines={1}>
+          {subtitle}
         </Text>
       </View>
-
-      {/* بطاقات الإحصائيات السريعة */}
-      <View style={styles.statsGrid}>
-        <View style={styles.statCard}>
-          <Text style={styles.statValue}>0</Text>
-          <Text style={styles.statLabel}>طلبات اليوم</Text>
-        </View>
-
-        <View style={styles.statCard}>
-          <Text style={styles.statValue}>0 ل.س</Text>
-          <Text style={styles.statLabel}>إجمالي المبيعات</Text>
-        </View>
-      </View>
-
-      {/* أختصارات الإدارة */}
-      <Text style={styles.sectionTitle}>إدارة متقادمة</Text>
-      <View style={styles.actionsContainer}>
-        <Link href="/(merchant)/products" asChild>
-          <TouchableOpacity style={styles.actionCard}>
-            <Text style={styles.actionText}>📦 قائمة المنتجات والأسعار</Text>
-          </TouchableOpacity>
-        </Link>
-
-        <Link href="/(merchant)/orders" asChild>
-          <TouchableOpacity style={styles.actionCard}>
-            <Text style={styles.actionText}>🛍️ إدارة الطلبات الواردة</Text>
-          </TouchableOpacity>
-        </Link>
-      </View>
-    </ScrollView>
+      <Ionicons name="chevron-back" size={18} color={Colors.text.muted} />
+    </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#f8fafc", padding: 16 },
-  centerContainer: {
-    flex: 1,
+  header: {
+    flexDirection: "row-reverse",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.md,
+    backgroundColor: Colors.background.paper,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border.light,
+  },
+  headerLeft: { flexDirection: "row", gap: Spacing.sm },
+  iconBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: Radius.md,
+    backgroundColor: Colors.primary.soft,
+    alignItems: "center",
     justifyContent: "center",
-    alignItems: "center",
-    padding: 20,
-    backgroundColor: "#f8fafc",
   },
-  headerCard: {
-    backgroundColor: "#0284c7",
-    padding: 20,
-    borderRadius: 12,
-    marginBottom: 16,
-  },
+  hi: { fontSize: FontSize.xs, color: Colors.text.muted },
   storeName: {
-    fontSize: 22,
-    fontWeight: "bold",
-    color: "#ffffff",
-    marginBottom: 6,
+    fontSize: FontSize.md,
+    fontWeight: FontWeight.bold,
+    color: Colors.text.primary,
   },
-  storeStatus: { fontSize: 14, color: "#e0f2fe" },
-  statsGrid: { flexDirection: "row-reverse", gap: 12, marginBottom: 20 },
-  statCard: {
-    flex: 1,
-    backgroundColor: "#ffffff",
-    padding: 16,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: "#e2e8f0",
+  heroWrap: { paddingHorizontal: Spacing.lg, paddingTop: Spacing.lg },
+  hero: {
+    backgroundColor: Colors.primary.main,
+    borderRadius: Radius.xl,
+    padding: Spacing.xl,
+    flexDirection: "row-reverse",
     alignItems: "center",
+    ...Shadow.md,
+  },
+  heroTitle: {
+    color: "#fff",
+    fontSize: FontSize.xxl,
+    fontWeight: FontWeight.bold,
+    textAlign: "right",
+  },
+  heroSub: {
+    color: Colors.primary.soft,
+    fontSize: FontSize.sm,
+    marginTop: 4,
+    textAlign: "right",
+  },
+  statsGrid: {
+    flexDirection: "row-reverse",
+    flexWrap: "wrap",
+    paddingHorizontal: Spacing.lg,
+    paddingTop: Spacing.lg,
+    gap: Spacing.md,
+  },
+  statCard: {
+    width: "47%",
+    backgroundColor: Colors.background.paper,
+    borderRadius: Radius.lg,
+    padding: Spacing.md,
+    borderWidth: 1,
+    borderColor: Colors.border.light,
+    ...Shadow.sm,
+  },
+  statIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: Radius.md,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: Spacing.sm,
   },
   statValue: {
-    fontSize: 20,
-    fontWeight: "bold",
-    color: "#0f172a",
-    marginBottom: 4,
+    fontSize: FontSize.xl,
+    fontWeight: FontWeight.extrabold,
+    color: Colors.text.primary,
+    textAlign: "right",
   },
-  statLabel: { fontSize: 13, color: "#64748b" },
+  statLabel: {
+    fontSize: FontSize.xs,
+    color: Colors.text.muted,
+    textAlign: "right",
+    marginTop: 2,
+  },
+  sectionHeader: {
+    paddingHorizontal: Spacing.lg,
+    paddingTop: Spacing.xl,
+    paddingBottom: Spacing.md,
+  },
   sectionTitle: {
-    fontSize: 18,
-    fontWeight: "bold",
-    color: "#0f172a",
-    marginBottom: 12,
+    fontSize: FontSize.lg,
+    fontWeight: FontWeight.bold,
+    color: Colors.text.primary,
+    textAlign: "right",
   },
-  actionsContainer: { gap: 10 },
+  actions: { paddingHorizontal: Spacing.lg, gap: Spacing.sm },
   actionCard: {
-    backgroundColor: "#ffffff",
-    padding: 16,
-    borderRadius: 10,
+    flexDirection: "row-reverse",
+    alignItems: "center",
+    gap: Spacing.md,
+    backgroundColor: Colors.background.paper,
+    borderRadius: Radius.lg,
+    padding: Spacing.md,
     borderWidth: 1,
-    borderColor: "#e2e8f0",
+    borderColor: Colors.border.light,
+    ...Shadow.sm,
   },
-  actionText: { fontSize: 16, fontWeight: "600", color: "#334155" },
-  noStoreTitle: {
-    fontSize: 20,
-    fontWeight: "bold",
-    color: "#0f172a",
-    marginBottom: 8,
+  pressed: { opacity: 0.9 },
+  actionIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: Radius.md,
+    alignItems: "center",
+    justifyContent: "center",
   },
-  noStoreSubtitle: {
-    fontSize: 14,
-    color: "#64748b",
-    textAlign: "center",
-    marginBottom: 20,
+  actionTitle: {
+    fontSize: FontSize.md,
+    fontWeight: FontWeight.bold,
+    color: Colors.text.primary,
+    textAlign: "right",
   },
-  primaryButton: {
-    backgroundColor: "#0284c7",
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    borderRadius: 8,
+  actionSub: {
+    fontSize: FontSize.xs,
+    color: Colors.text.muted,
+    textAlign: "right",
+    marginTop: 2,
   },
-  buttonText: { color: "#ffffff", fontWeight: "bold", fontSize: 16 },
 });

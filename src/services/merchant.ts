@@ -1,60 +1,6 @@
 // src/services/merchant.ts
-import { UserRole } from "@/types/auth";
+import type { CreateStoreInput, Merchant, UpdateStoreInput } from "@/types";
 import { supabase } from "@/utils/supabase";
-
-// Types & Interfaces للمتاجر
-export interface Merchant {
-  id: string;
-  owner_id: string;
-  store_name: string;
-  address?: string | null;
-  logo_url?: string | null;
-  is_active?: boolean;
-  created_at?: string;
-  updated_at?: string;
-}
-
-export interface CreateStoreInput {
-  store_name: string;
-  address?: string | null;
-}
-
-export interface UpdateStoreInput {
-  store_name?: string;
-  address?: string | null;
-  logo_url?: string | null;
-  is_active?: boolean;
-}
-
-// Types & Interfaces للمنتجات
-export interface Product {
-  id: string;
-  merchant_id: string;
-  name: string;
-  description?: string | null;
-  price: number;
-  image_url?: string | null;
-  is_available: boolean;
-  created_at?: string;
-  updated_at?: string;
-}
-
-export interface ProductInsert {
-  merchant_id: string;
-  name: string;
-  description?: string | null;
-  price: number;
-  image_url?: string | null;
-  is_available?: boolean;
-}
-
-export interface ProductUpdate {
-  name?: string;
-  description?: string | null;
-  price?: number;
-  image_url?: string | null;
-  is_available?: boolean;
-}
 
 export const merchantService = {
   /**
@@ -76,41 +22,128 @@ export const merchantService = {
   },
 
   /**
-   * تحويل العميل إلى تاجر / إنشاء متجر جديد:
-   * 1. إنشاء متجر جديد في جدول merchants
-   * 2. تحديث دور المستخدم (role) في جدول profiles إلى MERCHANT
+   * جلب جميع المتاجر النشطة (للعميل)
+   */
+  async listActive(): Promise<Merchant[]> {
+    const { data, error } = await supabase
+      .from("merchants")
+      .select("*")
+      .eq("is_active", true)
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      console.error("Error listing active merchants:", error);
+      throw error;
+    }
+
+    return data ?? [];
+  },
+
+  /**
+   * جلب متجر معيّن بالمعرّف (للعميل)
+   */
+  async getById(id: string): Promise<Merchant | null> {
+    const { data, error } = await supabase
+      .from("merchants")
+      .select("*")
+      .eq("id", id)
+      .maybeSingle();
+
+    if (error) {
+      console.error("Error fetching merchant by id:", error);
+      throw error;
+    }
+
+    return data;
+  },
+
+  /**
+   * متاجر قسم معيّن
+   */
+  async listByCategory(categoryId: string): Promise<Merchant[]> {
+    const { data, error } = await supabase
+      .from("merchants")
+      .select("*")
+      .eq("category_id", categoryId)
+      .eq("is_active", true)
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      console.error("Error listing merchants by category:", error);
+      throw error;
+    }
+
+    return data ?? [];
+  },
+
+  /**
+   * تحويل العميل إلى تاجر / إنشاء أو تحديث المتجر
+   * - إن وُجد متجر سابق → حدّثه (لا تفشل)
+   * - إن لم يوجد → أنشئ جديد
+   * - في كل الحالات → تأكد أن role = MERCHANT
    */
   async convertClientToMerchant(
     userId: string,
     storeData: CreateStoreInput,
   ): Promise<Merchant> {
-    // 1. إنشاء سجل المتجر
-    const { data: store, error: storeError } = await supabase
+    // 1. هل يوجد متجر سابق لهذا المستخدم؟
+    const { data: existing } = await supabase
       .from("merchants")
-      .insert({
-        owner_id: userId,
-        store_name: storeData.store_name,
-        address: storeData.address || null,
-        is_active: true,
-      })
-      .select()
-      .single();
+      .select("*")
+      .eq("owner_id", userId)
+      .maybeSingle();
 
-    if (storeError) {
-      console.error("Error creating merchant store:", storeError);
-      throw storeError;
+    let store: Merchant;
+
+    if (existing) {
+      // ✅ تحديث المتجر الموجود
+      const { data, error } = await supabase
+        .from("merchants")
+        .update({
+          store_name: storeData.store_name,
+          address: storeData.address ?? null,
+          logo_url: storeData.logo_url ?? existing.logo_url,
+          category_id: storeData.category_id ?? existing.category_id,
+        })
+        .eq("id", existing.id)
+        .select()
+        .single();
+
+      if (error) {
+        console.error("Error updating merchant:", error);
+        throw error;
+      }
+      store = data;
+    } else {
+      // ✅ إنشاء جديد
+      const { data, error } = await supabase
+        .from("merchants")
+        .insert({
+          owner_id: userId,
+          store_name: storeData.store_name,
+          address: storeData.address ?? null,
+          logo_url: storeData.logo_url ?? null,
+          category_id: storeData.category_id ?? null,
+          is_active: true,
+        })
+        .select()
+        .single();
+
+      if (error) {
+        console.error("Error creating merchant:", error);
+        throw error;
+      }
+      store = data;
     }
 
-    // 2. تحديث دور البروفايل في profiles
-    const merchantRole: UserRole = "MERCHANT" as UserRole;
-
+    // 2. تحديث الدور (في كل الحالات — حتى لو كان MERCHANT مسبقاً)
     const { error: profileError } = await supabase
       .from("profiles")
-      .update({ role: merchantRole })
+      .update({ role: "MERCHANT" })
       .eq("id", userId);
 
     if (profileError) {
-      console.error("Error updating user role to MERCHANT:", profileError);
+      console.error("Error updating role:", profileError);
       throw profileError;
     }
 
@@ -118,7 +151,7 @@ export const merchantService = {
   },
 
   /**
-   * اسم بديل (Alias) لدعم الاستدعاء باسم createMerchant
+   * Alias للتوافق مع كود قديم
    */
   async createMerchant(
     userId: string,
@@ -134,19 +167,9 @@ export const merchantService = {
     merchantId: string,
     updates: UpdateStoreInput,
   ): Promise<Merchant> {
-    const payload: UpdateStoreInput & { updated_at: string } = {
-      updated_at: new Date().toISOString(),
-    };
-
-    if (updates.store_name !== undefined)
-      payload.store_name = updates.store_name;
-    if (updates.address !== undefined) payload.address = updates.address;
-    if (updates.logo_url !== undefined) payload.logo_url = updates.logo_url;
-    if (updates.is_active !== undefined) payload.is_active = updates.is_active;
-
     const { data, error } = await supabase
       .from("merchants")
-      .update(payload)
+      .update(updates)
       .eq("id", merchantId)
       .select()
       .single();
@@ -160,106 +183,40 @@ export const merchantService = {
   },
 
   /**
-   * جلب جميع منتجات متجر محدد
+   * تفعيل/تعطيل المتجر
    */
-  async getProducts(merchantId: string): Promise<Product[]> {
-    const { data, error } = await supabase
-      .from("products")
-      .select("*")
-      .eq("merchant_id", merchantId)
-      .order("created_at", { ascending: false });
-
-    if (error) {
-      console.error("Error fetching merchant products:", error);
-      throw error;
-    }
-
-    return data || [];
+  async toggleActive(merchantId: string, current: boolean): Promise<Merchant> {
+    return this.updateStore(merchantId, { is_active: !current });
   },
 
-  /**
-   * إضافة منتج جديد
-   */
-  async createProduct(productData: ProductInsert): Promise<Product> {
-    const { data, error } = await supabase
-      .from("products")
-      .insert(productData)
-      .select()
-      .single();
-
-    if (error) {
-      console.error("Error creating product:", error);
-      throw error;
-    }
-
-    return data;
-  },
+  // أضف داخل merchantService (قبل الإغلاق)
 
   /**
-   * تحديث بيانات منتج معين
+   * ترقية المستخدم إلى MERCHANT (يُستدعى عند التبديل للتاجر)
    */
-  async updateProduct(
-    productId: string,
-    updates: ProductUpdate,
-  ): Promise<Product> {
-    const { data, error } = await supabase
-      .from("products")
-      .update({
-        ...updates,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", productId)
-      .select()
-      .single();
-
-    if (error) {
-      console.error("Error updating product:", error);
-      throw error;
-    }
-
-    return data;
-  },
-
-  /**
-   * تبديل حالة توفر المنتج (متاح / غير متاح)
-   */
-  async toggleProductAvailability(
-    productId: string,
-    currentStatus: boolean,
-  ): Promise<Product> {
-    return this.updateProduct(productId, { is_available: !currentStatus });
-  },
-
-  /**
-   * حذف منتج
-   */
-  async deleteProduct(productId: string): Promise<void> {
+  async promoteToMerchant(userId: string): Promise<void> {
     const { error } = await supabase
-      .from("products")
-      .delete()
-      .eq("id", productId);
-
+      .from("profiles")
+      .update({ role: "MERCHANT" })
+      .eq("id", userId);
     if (error) {
-      console.error("Error deleting product:", error);
+      console.error("Error promoting to merchant:", error);
       throw error;
     }
   },
 
   /**
-   * جلب طلبات المتجر
+   * إرجاع المستخدم إلى CLIENT (يُستدعى عند التبديل للعميل)
+   * ⚠️ ملاحظة: المتجر يبقى موجوداً، فقط الواجهة تتغير
    */
-  async getOrders(merchantId: string) {
-    const { data, error } = await supabase
-      .from("orders")
-      .select("*, profiles:client_id(full_name, phone)")
-      .eq("merchant_id", merchantId)
-      .order("created_at", { ascending: false });
-
+  async demoteToClient(userId: string): Promise<void> {
+    const { error } = await supabase
+      .from("profiles")
+      .update({ role: "CLIENT" })
+      .eq("id", userId);
     if (error) {
-      console.error("Error fetching merchant orders:", error);
+      console.error("Error demoting to client:", error);
       throw error;
     }
-
-    return data || [];
   },
 };

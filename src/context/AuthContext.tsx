@@ -1,5 +1,6 @@
 import { AuthContextType, Profile, UserRole } from "@/types/auth";
 import { supabase } from "@/utils/supabase";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Session } from "@supabase/supabase-js";
 import React, { createContext, useContext, useEffect, useState } from "react";
 
@@ -115,6 +116,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     setIsLoading(true);
     try {
       await supabase.auth.signOut();
+      await AsyncStorage.removeItem("talabnah.viewMode");
     } finally {
       setProfile(null);
       setSession(null);

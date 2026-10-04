@@ -1,38 +1,41 @@
+// src/app/(merchant)/_layout.tsx
+import { Colors } from "@/constants/colors";
+import { Ionicons } from "@expo/vector-icons";
 import { Tabs } from "expo-router";
-import { Package, ShoppingBag, Store } from "lucide-react-native";
 
 export default function MerchantLayout() {
   return (
     <Tabs
       screenOptions={{
-        headerShown: true,
-        tabBarActiveTintColor: "#0284c7",
-        tabBarInactiveTintColor: "#64748b",
+        headerShown: false,
+        tabBarActiveTintColor: Colors.primary.main,
+        tabBarInactiveTintColor: Colors.text.muted,
         tabBarStyle: {
-          backgroundColor: "#ffffff",
+          backgroundColor: Colors.background.paper,
           borderTopWidth: 1,
-          borderTopColor: "#e2e8f0",
-          height: 60,
+          borderTopColor: Colors.border.light,
+          height: 64,
           paddingBottom: 8,
-          paddingTop: 8,
+          paddingTop: 6,
         },
+        tabBarLabelStyle: { fontSize: 11, fontWeight: "600" },
       }}
     >
       <Tabs.Screen
         name="index"
         options={{
           title: "الرئيسية",
-          tabBarLabel: "الرئيسية",
-          tabBarIcon: ({ color, size }) => <Store color={color} size={size} />,
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="grid-outline" size={size} color={color} />
+          ),
         }}
       />
       <Tabs.Screen
         name="products"
         options={{
           title: "المنتجات",
-          tabBarLabel: "المنتجات",
           tabBarIcon: ({ color, size }) => (
-            <Package color={color} size={size} />
+            <Ionicons name="cube-outline" size={size} color={color} />
           ),
         }}
       />
@@ -40,20 +43,16 @@ export default function MerchantLayout() {
         name="orders"
         options={{
           title: "الطلبات",
-          tabBarLabel: "الطلبات",
           tabBarIcon: ({ color, size }) => (
-            <ShoppingBag color={color} size={size} />
+            <Ionicons name="receipt-outline" size={size} color={color} />
           ),
         }}
       />
-      <Tabs.Screen
-        name="setup-store"
-        options={{
-          // إخفاء زر التاب لشاشة إنشاء المتجر مع إبقائها داخل الملاحة
-          href: null,
-          title: "إعداد المتجر",
-        }}
-      />
+
+      {/* Hidden screens */}
+      <Tabs.Screen name="setup-store" options={{ href: null }} />
+      <Tabs.Screen name="product-form" options={{ href: null }} />
+      <Tabs.Screen name="order/[id]" options={{ href: null }} />
     </Tabs>
   );
 }
