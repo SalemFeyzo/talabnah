@@ -3,7 +3,6 @@ import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
 import {
-  Alert,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -18,7 +17,6 @@ import { Colors } from "@/constants/colors";
 import { Radius, Shadow, Spacing } from "@/constants/spacing";
 import { FontSize, FontWeight } from "@/constants/typography";
 import { useAuth } from "@/context/AuthContext";
-import { useViewMode } from "@/context/ViewModeContext";
 import { merchantService } from "@/services/merchant";
 import { orderService } from "@/services/order";
 import type { Merchant } from "@/types";
@@ -31,12 +29,20 @@ interface Stats {
   todayRevenue: number;
 }
 
+interface StaffInfo {
+  id: string;
+  job_title: string;
+  can_manage_products: boolean;
+  can_manage_orders: boolean;
+}
+
 export default function MerchantDashboard() {
   const router = useRouter();
-  const { user, refreshProfile } = useAuth();
-  const { setViewMode } = useViewMode();
+  const { user } = useAuth();
 
   const [merchant, setMerchant] = useState<Merchant | null>(null);
+  const [isOwner, setIsOwner] = useState(false);
+  const [staff, setStaff] = useState<StaffInfo | null>(null);
   const [stats, setStats] = useState<Stats | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -44,10 +50,18 @@ export default function MerchantDashboard() {
   const load = useCallback(async () => {
     if (!user?.id) return;
     try {
-      const m = await merchantService.getMyMerchant(user.id);
-      setMerchant(m);
-      if (m) {
-        const s = await orderService.getMerchantStats(m.id);
+      const ctx = await merchantService.getMyStoreContext(user.id);
+      console.log("🔍 Store Context:", {
+        isOwner: ctx.isOwner,
+        merchant: ctx.merchant?.store_name,
+        staff: ctx.staff,
+      });
+      setMerchant(ctx.merchant);
+      setIsOwner(ctx.isOwner);
+      setStaff(ctx.staff);
+
+      if (ctx.merchant) {
+        const s = await orderService.getMerchantStats(ctx.merchant.id);
         setStats(s);
       }
     } catch (e) {
@@ -62,7 +76,7 @@ export default function MerchantDashboard() {
     load();
   }, [load]);
 
-  // ============ Realtime subscription ============
+  // Realtime subscription
   useEffect(() => {
     if (!merchant?.id) return;
 
@@ -86,21 +100,9 @@ export default function MerchantDashboard() {
     load();
   };
 
-  const handleSwitchToClient = async () => {
-    if (!user?.id) return;
-    try {
-      await merchantService.demoteToClient(user.id);
-      await refreshProfile();
-      await setViewMode("client");
-      router.replace("/(client)");
-    } catch (e: any) {
-      console.error("Switch to client:", e);
-      Alert.alert("خطأ", e?.message ?? "تعذّر التبديل");
-    }
-  };
-
   if (loading) return <AppLoader message="جاري التحميل..." />;
 
+  // لا يوجد متجر
   if (!merchant) {
     return (
       <ScreenContainer edges={["top"]}>
@@ -121,6 +123,28 @@ export default function MerchantDashboard() {
     );
   }
 
+  // ⭐ الموظف بدون صلاحيات
+  const hasAnyPermission =
+    isOwner || staff?.can_manage_products || staff?.can_manage_orders;
+
+  if (!hasAnyPermission) {
+    return (
+      <ScreenContainer edges={["top"]}>
+        <AppEmptyState
+          title="لا توجد صلاحيات"
+          message="ليس لديك أي صلاحيات في هذا المتجر. تواصل مع صاحب المتجر."
+          icon={
+            <Ionicons
+              name="lock-closed-outline"
+              size={64}
+              color={Colors.text.muted}
+            />
+          }
+        />
+      </ScreenContainer>
+    );
+  }
+
   return (
     <ScreenContainer scroll={false} padded={false} edges={["top"]}>
       <ScrollView
@@ -130,41 +154,42 @@ export default function MerchantDashboard() {
         }
         showsVerticalScrollIndicator={false}
       >
+        {/* Header */}
         <View style={styles.header}>
-          <View style={styles.headerLeft}>
-            <Pressable style={styles.iconBtn} onPress={handleSwitchToClient}>
-              <Ionicons
-                name="swap-horizontal"
-                size={20}
-                color={Colors.primary.main}
-              />
-            </Pressable>
-            <Pressable style={styles.iconBtn}>
-              <Ionicons
-                name="notifications-outline"
-                size={20}
-                color={Colors.primary.main}
-              />
-            </Pressable>
-          </View>
-          <View style={{ alignItems: "flex-end", flex: 1 }}>
-            <Text style={styles.hi}>مرحباً بك</Text>
+          <View style={{ flex: 1, alignItems: "flex-end" }}>
+            <Text style={styles.hi}>
+              {isOwner ? "مرحباً بك" : `مرحباً، ${staff?.job_title ?? "موظف"}`}
+            </Text>
             <Text style={styles.storeName} numberOfLines={1}>
               {merchant.store_name}
             </Text>
           </View>
         </View>
 
+        {/* Hero */}
         <View style={styles.heroWrap}>
           <View style={styles.hero}>
             <View style={{ flex: 1 }}>
-              <Text style={styles.heroTitle}>لوحة التاجر</Text>
-              <Text style={styles.heroSub}>
-                {merchant.is_active ? "متجرك نشط الآن" : "متجرك مغلق"}
+              <Text style={styles.heroTitle}>
+                {isOwner ? "لوحة التاجر" : "لوحة الموظف"}
               </Text>
+              <Text style={styles.heroSub}>
+                {merchant.is_active ? "المتجر نشط الآن" : "المتجر مغلق"}
+              </Text>
+
+              {!isOwner && staff ? (
+                <View style={styles.roleBadge}>
+                  <Ionicons
+                    name="shield-checkmark"
+                    size={12}
+                    color={Colors.gold.main}
+                  />
+                  <Text style={styles.roleBadgeText}>{staff.job_title}</Text>
+                </View>
+              ) : null}
             </View>
             <Ionicons
-              name="trending-up"
+              name={isOwner ? "trending-up" : "people"}
               size={56}
               color={Colors.gold.main}
               style={{ opacity: 0.4 }}
@@ -172,6 +197,7 @@ export default function MerchantDashboard() {
           </View>
         </View>
 
+        {/* Stats */}
         <View style={styles.statsGrid}>
           <StatCard
             icon="time-outline"
@@ -199,32 +225,41 @@ export default function MerchantDashboard() {
           />
         </View>
 
+        {/* Actions */}
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>أدوات الإدارة</Text>
         </View>
 
         <View style={styles.actions}>
-          <ActionCard
-            icon="cube-outline"
-            title="المنتجات"
-            subtitle="إدارة قائمة منتجاتك"
-            onPress={() => router.push("/(merchant)/products")}
-            color={Colors.primary.main}
-          />
-          <ActionCard
-            icon="receipt-outline"
-            title="الطلبات"
-            subtitle="استعرض طلبات العملاء"
-            onPress={() => router.push("/(merchant)/orders")}
-            color={Colors.gold.dark}
-          />
-          <ActionCard
-            icon="storefront-outline"
-            title="بيانات المتجر"
-            subtitle="تعديل الاسم والشعار"
-            onPress={() => router.push("/(merchant)/setup-store")}
-            color={Colors.status.info}
-          />
+          {isOwner || staff?.can_manage_products ? (
+            <ActionCard
+              icon="cube-outline"
+              title="المنتجات"
+              subtitle="إدارة قائمة منتجاتك"
+              onPress={() => router.push("/(merchant)/products")}
+              color={Colors.primary.main}
+            />
+          ) : null}
+
+          {isOwner || staff?.can_manage_orders ? (
+            <ActionCard
+              icon="receipt-outline"
+              title="الطلبات"
+              subtitle="استعرض طلبات العملاء"
+              onPress={() => router.push("/(merchant)/orders")}
+              color={Colors.gold.dark}
+            />
+          ) : null}
+
+          {isOwner ? (
+            <ActionCard
+              icon="storefront-outline"
+              title="بيانات المتجر"
+              subtitle="تعديل الاسم والشعار والموظفين"
+              onPress={() => router.push("/(merchant)/profile")}
+              color={Colors.status.info}
+            />
+          ) : null}
         </View>
       </ScrollView>
     </ScreenContainer>
@@ -300,15 +335,6 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: Colors.border.light,
   },
-  headerLeft: { flexDirection: "row", gap: Spacing.sm },
-  iconBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: Radius.md,
-    backgroundColor: Colors.primary.soft,
-    alignItems: "center",
-    justifyContent: "center",
-  },
   hi: { fontSize: FontSize.xs, color: Colors.text.muted },
   storeName: {
     fontSize: FontSize.md,
@@ -335,6 +361,22 @@ const styles = StyleSheet.create({
     fontSize: FontSize.sm,
     marginTop: 4,
     textAlign: "right",
+  },
+  roleBadge: {
+    flexDirection: "row-reverse",
+    alignItems: "center",
+    gap: 4,
+    alignSelf: "flex-end",
+    backgroundColor: "rgba(255,255,255,0.15)",
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: 3,
+    borderRadius: Radius.full,
+    marginTop: Spacing.sm,
+  },
+  roleBadgeText: {
+    color: Colors.gold.main,
+    fontSize: 10,
+    fontWeight: FontWeight.bold,
   },
   statsGrid: {
     flexDirection: "row-reverse",

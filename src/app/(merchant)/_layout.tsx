@@ -48,6 +48,15 @@ export default function MerchantLayout() {
           ),
         }}
       />
+      <Tabs.Screen
+        name="profile"
+        options={{
+          title: "متجري",
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="storefront-outline" size={size} color={color} />
+          ),
+        }}
+      />
 
       {/* Hidden screens */}
       <Tabs.Screen name="setup-store" options={{ href: null }} />

@@ -1,8 +1,15 @@
-// src/app/(merchant)/order/[id].tsx
+// src/app/(driver)/order/[id].tsx
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import {
+  Linking,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
 
 import { ScreenContainer } from "@/components/layout";
 import {
@@ -15,98 +22,83 @@ import { Colors } from "@/constants/colors";
 import { Radius, Shadow, Spacing } from "@/constants/spacing";
 import { FontSize, FontWeight } from "@/constants/typography";
 import { useAuth } from "@/context/AuthContext";
-import { merchantService } from "@/services/merchant";
-import { orderService } from "@/services/order";
-import type { OrderStatus } from "@/types";
+import { driverService } from "@/services/driver";
 import { showAlert, showConfirm } from "@/utils/confirm";
 
-interface OrderDetails {
-  id: string;
-  status: OrderStatus;
-  total_amount: number;
-  delivery_fee: number;
-  notes: string | null;
-  created_at: string;
-  items: {
-    id: string;
-    product_name: string;
-    unit_price: number;
-    quantity: number;
-  }[];
-  client?: {
-    id: string;
-    full_name: string;
-    phone: string;
-  };
-}
-
-const NEXT_ACTIONS: Record<
-  OrderStatus,
-  { label: string; next: OrderStatus; variant: "primary" | "gold" | "danger" }[]
-> = {
-  PENDING: [
-    { label: "قبول الطلب", next: "PREPARING", variant: "primary" },
-    { label: "إلغاء الطلب", next: "CANCELLED", variant: "danger" },
-  ],
-  PREPARING: [{ label: "جاهز للتوصيل", next: "READY", variant: "gold" }],
-  READY: [{ label: "بدأ التوصيل", next: "ON_THE_WAY", variant: "primary" }],
-  ON_THE_WAY: [{ label: "تم التسليم", next: "DELIVERED", variant: "primary" }],
-  DELIVERED: [],
-  CANCELLED: [],
-};
-
-export default function MerchantOrderDetails() {
+export default function DriverOrderDetails() {
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
   const { user } = useAuth();
 
-  const [order, setOrder] = useState<OrderDetails | null>(null);
-  const [canManage, setCanManage] = useState(false);
+  const [order, setOrder] = useState<any | null>(null);
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState(false);
 
   const load = useCallback(async () => {
-    if (!id || !user?.id) return;
+    if (!id) return;
     try {
-      const ctx = await merchantService.getMyStoreContext(user.id);
-      setCanManage(ctx.isOwner || (ctx.staff?.can_manage_orders ?? false));
-      const data = await orderService.getMerchantOrderDetails(id);
+      const data = await driverService.getOrderDetails(id);
       setOrder(data);
     } catch (e) {
       console.error("Load order:", e);
     } finally {
       setLoading(false);
     }
-  }, [id, user?.id]);
+  }, [id]);
 
   useEffect(() => {
     load();
   }, [load]);
 
-  const handleUpdateStatus = (next: OrderStatus, label: string) => {
-    const confirmMsg =
-      next === "CANCELLED"
-        ? "هل أنت متأكد من إلغاء الطلب؟ لا يمكن التراجع."
-        : `هل تريد تنفيذ: "${label}"؟`;
-
-    showConfirm(label, confirmMsg, async () => {
-      if (!order) return;
+  const handleAccept = () => {
+    if (!user?.id || !order) return;
+    showConfirm("قبول الطلب", "هل تريد قبول هذا الطلب؟", async () => {
       setUpdating(true);
       try {
-        const updated = await orderService.updateStatus(order.id, next);
-        setOrder((prev) => (prev ? { ...prev, status: updated.status } : prev));
+        const updated = await driverService.acceptOrder(order.id, user.id);
+        setOrder((prev: any) => ({ ...prev, ...updated }));
         setUpdating(false);
         setTimeout(() => {
-          showAlert("✅", "تم تحديث حالة الطلب");
+          showAlert("✅", "تم قبول الطلب. توجه للعميل الآن.");
         }, 100);
       } catch (e: any) {
-        console.error("Update status:", e);
         setUpdating(false);
         setTimeout(() => {
-          showAlert("خطأ", e?.message ?? "تعذّر تحديث الحالة");
+          showAlert("خطأ", e?.message ?? "تعذّر قبول الطلب");
         }, 100);
       }
     });
+  };
+
+  const handleDelivered = () => {
+    if (!order) return;
+    showConfirm("تأكيد التسليم", "هل تم تسليم الطلب للعميل؟", async () => {
+      setUpdating(true);
+      try {
+        const updated = await driverService.updateOrderStatus(
+          order.id,
+          "DELIVERED",
+        );
+        setOrder((prev: any) => ({ ...prev, ...updated }));
+        setUpdating(false);
+        setTimeout(() => {
+          showAlert("🎉", "تم التسليم بنجاح");
+          router.replace("/(driver)");
+        }, 100);
+      } catch (e: any) {
+        setUpdating(false);
+        setTimeout(() => {
+          showAlert("خطأ", e?.message ?? "تعذّر تأكيد التسليم");
+        }, 100);
+      }
+    });
+  };
+
+  const handleCall = (phone?: string) => {
+    if (!phone) return;
+    Linking.openURL(`tel:${phone}`).catch(() =>
+      showAlert("خطأ", "تعذّر فتح الاتصال"),
+    );
   };
 
   if (loading) return <AppLoader message="جاري التحميل..." />;
@@ -123,11 +115,13 @@ export default function MerchantOrderDetails() {
     );
   }
 
-  const actions = canManage ? (NEXT_ACTIONS[order.status] ?? []) : [];
-  const subtotal = order.total_amount - (order.delivery_fee ?? 0);
+  const isAvailable = order.status === "READY" && !order.driver_id;
+  const isMyActive =
+    order.driver_id === user?.id && order.status === "ON_THE_WAY";
 
   return (
     <ScreenContainer scroll={false} padded={false} edges={["top"]}>
+      {/* Header */}
       <View style={styles.header}>
         <Pressable
           onPress={() => router.back()}
@@ -150,22 +144,18 @@ export default function MerchantOrderDetails() {
         contentContainerStyle={{ padding: Spacing.lg, paddingBottom: 160 }}
         showsVerticalScrollIndicator={false}
       >
+        {/* Status */}
         <View style={styles.statusCard}>
           <View style={styles.statusHeader}>
             <StatusBadge status={order.status} />
             <Text style={styles.statusLabel}>حالة الطلب</Text>
           </View>
-          <Text style={styles.statusDate}>
-            {new Date(order.created_at).toLocaleString("ar-EG", {
-              dateStyle: "medium",
-              timeStyle: "short",
-            })}
-          </Text>
         </View>
 
+        {/* Client */}
         {order.client ? (
           <>
-            <Text style={styles.sectionTitle}>بيانات العميل</Text>
+            <Text style={styles.sectionTitle}>العميل</Text>
             <View style={styles.card}>
               <View style={styles.clientRow}>
                 <View style={styles.clientAvatar}>
@@ -181,89 +171,112 @@ export default function MerchantOrderDetails() {
                   </Text>
                   <Text style={styles.clientPhone}>{order.client.phone}</Text>
                 </View>
+                <Pressable
+                  style={styles.callBtn}
+                  onPress={() => handleCall(order.client.phone)}
+                >
+                  <Ionicons name="call" size={18} color="#fff" />
+                </Pressable>
               </View>
             </View>
           </>
         ) : null}
 
-        <Text style={styles.sectionTitle}>المنتجات</Text>
-        <View style={styles.card}>
-          {order.items.map((it, idx) => (
-            <View
-              key={it.id}
-              style={[
-                styles.itemRow,
-                idx < order.items.length - 1 && styles.itemRowBorder,
-              ]}
-            >
-              <View style={styles.qtyBox}>
-                <Text style={styles.qtyText}>×{it.quantity}</Text>
+        {/* Merchant */}
+        {order.merchant ? (
+          <>
+            <Text style={styles.sectionTitle}>المتجر</Text>
+            <View style={styles.card}>
+              <View style={styles.clientRow}>
+                <View style={styles.storeAvatar}>
+                  <Ionicons
+                    name="storefront"
+                    size={20}
+                    color={Colors.gold.dark}
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.clientName}>
+                    {order.merchant.store_name}
+                  </Text>
+                  {order.merchant.address ? (
+                    <Text style={styles.clientPhone}>
+                      {order.merchant.address}
+                    </Text>
+                  ) : null}
+                </View>
               </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.itemName} numberOfLines={1}>
-                  {it.product_name}
-                </Text>
-                <Text style={styles.itemPrice}>
-                  {Number(it.unit_price).toFixed(2)} ل.س / وحدة
-                </Text>
-              </View>
-              <Text style={styles.itemTotal}>
-                {(Number(it.unit_price) * it.quantity).toFixed(2)} ل.س
-              </Text>
             </View>
-          ))}
-        </View>
+          </>
+        ) : null}
 
+        {/* Items */}
+        {order.items && order.items.length > 0 ? (
+          <>
+            <Text style={styles.sectionTitle}>المنتجات</Text>
+            <View style={styles.card}>
+              {order.items.map((it: any, idx: number) => (
+                <View
+                  key={it.id}
+                  style={[
+                    styles.itemRow,
+                    idx < order.items.length - 1 && styles.itemRowBorder,
+                  ]}
+                >
+                  <View style={styles.qtyBox}>
+                    <Text style={styles.qtyText}>×{it.quantity}</Text>
+                  </View>
+                  <Text style={styles.itemName} numberOfLines={1}>
+                    {it.product_name}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          </>
+        ) : null}
+
+        {/* Totals */}
         <Text style={styles.sectionTitle}>الفاتورة</Text>
         <View style={styles.card}>
           <View style={styles.totalRow}>
-            <Text style={styles.totalValue}>{subtotal.toFixed(2)} ل.س</Text>
-            <Text style={styles.totalLabel}>المجموع الفرعي</Text>
-          </View>
-          <View style={styles.totalRow}>
             <Text style={styles.totalValue}>
-              {Number(order.delivery_fee ?? 0).toFixed(2)} ل.س
+              {Number(order.total_amount).toFixed(2)} ل.س
             </Text>
-            <Text style={styles.totalLabel}>التوصيل</Text>
+            <Text style={styles.totalLabel}>إجمالي الطلب</Text>
           </View>
           <View style={styles.totalDivider} />
           <View style={styles.totalRow}>
             <Text style={styles.grandValue}>
-              {Number(order.total_amount).toFixed(2)} ل.س
+              {Number(order.delivery_fee ?? 0).toFixed(2)} ل.س
             </Text>
-            <Text style={styles.grandLabel}>الإجمالي</Text>
+            <Text style={styles.grandLabel}>أجرة التوصيل</Text>
           </View>
         </View>
-
-        {order.notes ? (
-          <>
-            <Text style={styles.sectionTitle}>ملاحظات العميل</Text>
-            <View style={[styles.card, styles.notesCard]}>
-              <Ionicons
-                name="chatbubble-ellipses-outline"
-                size={18}
-                color={Colors.gold.dark}
-              />
-              <Text style={styles.notesText}>{order.notes}</Text>
-            </View>
-          </>
-        ) : null}
       </ScrollView>
 
-      {actions.length > 0 ? (
+      {/* Actions */}
+      {isAvailable || isMyActive ? (
         <View style={styles.actions}>
-          {actions.map((a) => (
+          {isAvailable ? (
             <AppButton
-              key={a.label}
-              label={a.label}
-              onPress={() => handleUpdateStatus(a.next, a.label)}
+              label="قبول الطلب"
+              onPress={handleAccept}
               loading={updating}
               disabled={updating}
-              variant={a.variant}
+              variant="primary"
               fullWidth
-              style={{ marginBottom: Spacing.sm }}
             />
-          ))}
+          ) : null}
+          {isMyActive ? (
+            <AppButton
+              label="تأكيد التسليم"
+              onPress={handleDelivered}
+              loading={updating}
+              disabled={updating}
+              variant="primary"
+              fullWidth
+            />
+          ) : null}
         </View>
       ) : null}
     </ScreenContainer>
@@ -313,12 +326,6 @@ const styles = StyleSheet.create({
     fontWeight: FontWeight.bold,
     color: Colors.text.primary,
   },
-  statusDate: {
-    fontSize: FontSize.xs,
-    color: Colors.text.muted,
-    marginTop: Spacing.sm,
-    textAlign: "right",
-  },
   sectionTitle: {
     fontSize: FontSize.md,
     fontWeight: FontWeight.bold,
@@ -348,6 +355,14 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  storeAvatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: Colors.gold.soft,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   clientName: {
     fontSize: FontSize.md,
     fontWeight: FontWeight.bold,
@@ -359,6 +374,14 @@ const styles = StyleSheet.create({
     color: Colors.text.muted,
     textAlign: "right",
     marginTop: 2,
+  },
+  callBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: Colors.primary.main,
+    alignItems: "center",
+    justifyContent: "center",
   },
   itemRow: {
     flexDirection: "row-reverse",
@@ -384,21 +407,11 @@ const styles = StyleSheet.create({
     fontSize: FontSize.xs,
   },
   itemName: {
+    flex: 1,
     fontSize: FontSize.sm,
     fontWeight: FontWeight.semibold,
     color: Colors.text.primary,
     textAlign: "right",
-  },
-  itemPrice: {
-    fontSize: FontSize.xs,
-    color: Colors.text.muted,
-    textAlign: "right",
-    marginTop: 2,
-  },
-  itemTotal: {
-    fontSize: FontSize.sm,
-    fontWeight: FontWeight.bold,
-    color: Colors.gold.dark,
   },
   totalRow: {
     flexDirection: "row-reverse",
@@ -426,20 +439,6 @@ const styles = StyleSheet.create({
     fontSize: FontSize.xl,
     fontWeight: FontWeight.extrabold,
     color: Colors.gold.dark,
-  },
-  notesCard: {
-    flexDirection: "row-reverse",
-    alignItems: "flex-start",
-    gap: Spacing.sm,
-    backgroundColor: Colors.gold.soft,
-    borderColor: Colors.gold.light,
-  },
-  notesText: {
-    flex: 1,
-    fontSize: FontSize.sm,
-    color: Colors.text.primary,
-    textAlign: "right",
-    lineHeight: 20,
   },
   actions: {
     position: "absolute",

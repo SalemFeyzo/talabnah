@@ -489,12 +489,36 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      find_user_by_phone: {
+        Args: { phone_variants: string[] }
+        Returns: {
+          full_name: string
+          id: string
+          phone: string
+          role: Database["public"]["Enums"]["user_role"]
+        }[]
+      }
       get_my_role: {
         Args: never
         Returns: Database["public"]["Enums"]["user_role"]
       }
       is_admin: { Args: never; Returns: boolean }
+      is_driver: { Args: never; Returns: boolean }
       is_merchant_owner: { Args: { m_id: string }; Returns: boolean }
+      set_user_role: {
+        Args: {
+          new_role: Database["public"]["Enums"]["user_role"]
+          target_user_id: string
+        }
+        Returns: undefined
+      }
+      suggest_users_by_phone_suffix: {
+        Args: { suffix: string }
+        Returns: {
+          full_name: string
+          phone: string
+        }[]
+      }
     }
     Enums: {
       order_status:

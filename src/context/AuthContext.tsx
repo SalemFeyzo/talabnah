@@ -1,3 +1,4 @@
+// src/context/AuthContext.tsx
 import { AuthContextType, Profile, UserRole } from "@/types/auth";
 import { supabase } from "@/utils/supabase";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -63,16 +64,24 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     } = supabase.auth.onAuthStateChange(async (event, currentSession) => {
       if (!isMounted) return;
 
-      console.log("⚡ تم تسجيل الدخول", event);
+      console.log("⚡ حالة المصادقة تغيّرت:", event);
+
+      // ⭐ الحل: أعِد isLoading إلى true قبل جلب البروفايل
+      setIsLoading(true);
+
       setSession(currentSession);
 
       if (currentSession?.user) {
         await fetchProfile(currentSession.user.id);
       } else {
         setProfile(null);
+        // امسح viewMode عند تسجيل الخروج
+        await AsyncStorage.removeItem("talabnah.viewMode");
       }
 
-      setIsLoading(false);
+      if (isMounted) {
+        setIsLoading(false);
+      }
     });
 
     return () => {
@@ -106,7 +115,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       options: {
         data: {
           full_name: fullName,
-          phone_number: phone,
+          phone: phone,
         },
       },
     });
@@ -116,6 +125,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     setIsLoading(true);
     try {
       await supabase.auth.signOut();
+      // امسح viewMode
       await AsyncStorage.removeItem("talabnah.viewMode");
     } finally {
       setProfile(null);
@@ -124,8 +134,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     }
   };
 
-  const role: UserRole | null =
-    profile?.role ?? (session ? ("CLIENT" as UserRole) : null);
+  // ⚠️ لا نستخدم CLIENT كـ fallback — يجب انتظار profile
+  const role: UserRole | null = profile?.role ?? null;
 
   return (
     <AuthContext.Provider

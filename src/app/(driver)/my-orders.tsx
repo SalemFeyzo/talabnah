@@ -1,4 +1,4 @@
-// src/app/(merchant)/orders.tsx
+// src/app/(driver)/my-orders.tsx
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -18,27 +18,15 @@ import { Colors } from "@/constants/colors";
 import { Radius, Shadow, Spacing } from "@/constants/spacing";
 import { FontSize, FontWeight } from "@/constants/typography";
 import { useAuth } from "@/context/AuthContext";
-import { merchantService } from "@/services/merchant";
-import { orderService } from "@/services/order";
-import type { Order, OrderStatus } from "@/types";
+import { driverService } from "@/services/driver";
+import type { Order } from "@/types";
 
-type Filter = "ALL" | OrderStatus;
+type Filter = "ALL" | "ACTIVE" | "DELIVERED";
 
-const FILTERS: { key: Filter; label: string }[] = [
-  { key: "ALL", label: "الكل" },
-  { key: "PENDING", label: "قيد الانتظار" },
-  { key: "PREPARING", label: "قيد التحضير" },
-  { key: "READY", label: "جاهز" },
-  { key: "ON_THE_WAY", label: "في الطريق" },
-  { key: "DELIVERED", label: "تم التسليم" },
-];
-
-export default function MerchantOrdersScreen() {
+export default function MyOrdersScreen() {
   const router = useRouter();
   const { user } = useAuth();
 
-  const [merchantId, setMerchantId] = useState<string | null>(null);
-  const [canManage, setCanManage] = useState(false);
   const [orders, setOrders] = useState<Order[]>([]);
   const [filter, setFilter] = useState<Filter>("ALL");
   const [loading, setLoading] = useState(true);
@@ -47,18 +35,10 @@ export default function MerchantOrdersScreen() {
   const load = useCallback(async () => {
     if (!user?.id) return;
     try {
-      const ctx = await merchantService.getMyStoreContext(user.id);
-      if (!ctx.merchant) {
-        setMerchantId(null);
-        setOrders([]);
-        return;
-      }
-      setMerchantId(ctx.merchant.id);
-      setCanManage(ctx.isOwner || (ctx.staff?.can_manage_orders ?? false));
-      const list = await orderService.listByMerchant(ctx.merchant.id);
+      const list = await driverService.listMyOrders(user.id);
       setOrders(list);
     } catch (e) {
-      console.error("Load orders:", e);
+      console.error("Load my orders:", e);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -69,15 +49,16 @@ export default function MerchantOrdersScreen() {
     load();
   }, [load]);
 
+  // Realtime
   useEffect(() => {
-    if (!merchantId) return;
+    if (!user?.id) return;
 
     let unsub: (() => void) | null = null;
     let mounted = true;
 
     const t = setTimeout(() => {
       if (!mounted) return;
-      unsub = orderService.subscribeMerchantOrders(merchantId, load);
+      unsub = driverService.subscribeMyOrders(user.id, load);
     }, 0);
 
     return () => {
@@ -85,7 +66,7 @@ export default function MerchantOrdersScreen() {
       clearTimeout(t);
       unsub?.();
     };
-  }, [merchantId, load]);
+  }, [user?.id, load]);
 
   const onRefresh = () => {
     setRefreshing(true);
@@ -94,64 +75,33 @@ export default function MerchantOrdersScreen() {
 
   const filtered = useMemo(() => {
     if (filter === "ALL") return orders;
-    return orders.filter((o) => o.status === filter);
+    if (filter === "ACTIVE")
+      return orders.filter((o) => o.status === "ON_THE_WAY");
+    return orders.filter((o) => o.status === "DELIVERED");
   }, [orders, filter]);
 
-  const counts = useMemo(() => {
-    const c: Record<string, number> = { ALL: orders.length };
-    for (const o of orders) {
-      c[o.status] = (c[o.status] ?? 0) + 1;
-    }
-    return c;
-  }, [orders]);
-
   if (loading) return <AppLoader message="جاري التحميل..." />;
-
-  if (!merchantId) {
-    return (
-      <ScreenContainer edges={["top"]}>
-        <AppEmptyState
-          title="لا يوجد متجر"
-          message="أنشئ متجرك أولاً لعرض الطلبات."
-        />
-      </ScreenContainer>
-    );
-  }
-
-  if (!canManage) {
-    return (
-      <ScreenContainer edges={["top"]}>
-        <AppEmptyState
-          title="لا توجد صلاحية"
-          message="ليس لديك صلاحية إدارة الطلبات."
-          icon={
-            <Ionicons
-              name="lock-closed-outline"
-              size={64}
-              color={Colors.text.muted}
-            />
-          }
-        />
-      </ScreenContainer>
-    );
-  }
 
   return (
     <ScreenContainer scroll={false} padded={false} edges={["top"]}>
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>الطلبات</Text>
+        <Text style={styles.headerTitle}>طلباتي</Text>
         <Text style={styles.headerCount}>{orders.length} طلب</Text>
       </View>
 
+      {/* Filters */}
       <View style={styles.filtersWrap}>
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.filtersContent}
         >
-          {FILTERS.map((f) => {
+          {[
+            { key: "ALL" as Filter, label: "الكل" },
+            { key: "ACTIVE" as Filter, label: "الجارية" },
+            { key: "DELIVERED" as Filter, label: "المكتملة" },
+          ].map((f) => {
             const active = filter === f.key;
-            const count = counts[f.key] ?? 0;
             return (
               <Pressable
                 key={f.key}
@@ -163,20 +113,6 @@ export default function MerchantOrdersScreen() {
                 >
                   {f.label}
                 </Text>
-                {count > 0 ? (
-                  <View
-                    style={[styles.chipBadge, active && styles.chipBadgeActive]}
-                  >
-                    <Text
-                      style={[
-                        styles.chipBadgeText,
-                        active && styles.chipBadgeTextActive,
-                      ]}
-                    >
-                      {count}
-                    </Text>
-                  </View>
-                ) : null}
               </Pressable>
             );
           })}
@@ -191,22 +127,62 @@ export default function MerchantOrdersScreen() {
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
         }
         renderItem={({ item }) => (
-          <OrderRow
-            order={item}
-            onPress={() => router.push(`/(merchant)/order/${item.id}` as any)}
-          />
+          <Pressable
+            onPress={() => router.push(`/(driver)/order/${item.id}` as any)}
+            style={({ pressed }) => [styles.card, pressed && styles.pressed]}
+          >
+            <View style={styles.cardHeader}>
+              <View style={styles.orderNumWrap}>
+                <Ionicons
+                  name="receipt-outline"
+                  size={16}
+                  color={Colors.primary.main}
+                />
+                <Text style={styles.orderNum}>
+                  #{item.id.slice(0, 6).toUpperCase()}
+                </Text>
+              </View>
+              <StatusBadge status={item.status} />
+            </View>
+
+            <View style={styles.divider} />
+
+            <View style={styles.row}>
+              <View style={styles.infoRow}>
+                <Ionicons
+                  name="time-outline"
+                  size={14}
+                  color={Colors.text.muted}
+                />
+                <Text style={styles.muted}>
+                  {new Date(item.created_at).toLocaleString("ar-EG", {
+                    day: "numeric",
+                    month: "short",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}
+                </Text>
+              </View>
+              <View style={styles.totalWrap}>
+                <Text style={styles.totalLabel}>أجرة التوصيل</Text>
+                <Text style={styles.totalValue}>
+                  {Number(item.delivery_fee ?? 0).toFixed(2)} ل.س
+                </Text>
+              </View>
+            </View>
+          </Pressable>
         )}
         ListEmptyComponent={
           <AppEmptyState
             title="لا توجد طلبات"
             message={
               filter === "ALL"
-                ? "لم يستقبل متجرك أي طلب بعد."
-                : "لا توجد طلبات بهذه الحالة."
+                ? "لم تقبل أي طلب بعد."
+                : "لا توجد طلبات في هذه الفئة."
             }
             icon={
               <Ionicons
-                name="receipt-outline"
+                name="bicycle-outline"
                 size={64}
                 color={Colors.text.muted}
               />
@@ -215,53 +191,6 @@ export default function MerchantOrdersScreen() {
         }
       />
     </ScreenContainer>
-  );
-}
-
-function OrderRow({ order, onPress }: { order: Order; onPress: () => void }) {
-  const date = new Date(order.created_at);
-  const dateStr = date.toLocaleString("ar-EG", {
-    day: "numeric",
-    month: "short",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-
-  return (
-    <Pressable
-      onPress={onPress}
-      style={({ pressed }) => [styles.card, pressed && styles.pressed]}
-    >
-      <View style={styles.cardHeader}>
-        <View style={styles.orderNumWrap}>
-          <Ionicons
-            name="receipt-outline"
-            size={16}
-            color={Colors.primary.main}
-          />
-          <Text style={styles.orderNum}>
-            #{order.id.slice(0, 6).toUpperCase()}
-          </Text>
-        </View>
-        <StatusBadge status={order.status} />
-      </View>
-
-      <View style={styles.cardDivider} />
-
-      <View style={styles.cardFooter}>
-        <View style={styles.dateWrap}>
-          <Ionicons name="time-outline" size={14} color={Colors.text.muted} />
-          <Text style={styles.date}>{dateStr}</Text>
-        </View>
-
-        <View style={styles.totalWrap}>
-          <Text style={styles.totalLabel}>الإجمالي</Text>
-          <Text style={styles.total}>
-            {Number(order.total_amount).toFixed(2)} ل.س
-          </Text>
-        </View>
-      </View>
-    </Pressable>
   );
 }
 
@@ -294,10 +223,7 @@ const styles = StyleSheet.create({
     flexDirection: "row-reverse",
   },
   chip: {
-    flexDirection: "row-reverse",
-    alignItems: "center",
-    gap: 6,
-    paddingHorizontal: Spacing.md,
+    paddingHorizontal: Spacing.lg,
     paddingVertical: Spacing.sm,
     borderRadius: Radius.full,
     backgroundColor: Colors.gray[100],
@@ -314,22 +240,6 @@ const styles = StyleSheet.create({
     color: Colors.text.secondary,
   },
   chipTextActive: { color: "#fff" },
-  chipBadge: {
-    backgroundColor: Colors.background.paper,
-    borderRadius: Radius.full,
-    minWidth: 18,
-    height: 18,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 5,
-  },
-  chipBadgeActive: { backgroundColor: Colors.gold.main },
-  chipBadgeText: {
-    fontSize: 10,
-    fontWeight: FontWeight.bold,
-    color: Colors.text.secondary,
-  },
-  chipBadgeTextActive: { color: "#fff" },
   card: {
     backgroundColor: Colors.background.paper,
     borderRadius: Radius.lg,
@@ -355,29 +265,29 @@ const styles = StyleSheet.create({
     fontWeight: FontWeight.bold,
     color: Colors.text.primary,
   },
-  cardDivider: {
+  divider: {
     height: 1,
     backgroundColor: Colors.border.light,
     marginVertical: Spacing.sm,
   },
-  cardFooter: {
+  row: {
     flexDirection: "row-reverse",
     alignItems: "center",
     justifyContent: "space-between",
   },
-  dateWrap: {
+  infoRow: {
     flexDirection: "row-reverse",
     alignItems: "center",
     gap: 4,
   },
-  date: { fontSize: FontSize.xs, color: Colors.text.muted },
+  muted: { fontSize: FontSize.xs, color: Colors.text.muted },
   totalWrap: { alignItems: "flex-start" },
   totalLabel: {
     fontSize: FontSize.xs,
     color: Colors.text.muted,
     textAlign: "right",
   },
-  total: {
+  totalValue: {
     fontSize: FontSize.md,
     fontWeight: FontWeight.bold,
     color: Colors.gold.dark,

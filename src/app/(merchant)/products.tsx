@@ -51,6 +51,7 @@ export default function ProductsScreen() {
   const { user } = useAuth();
 
   const [merchantId, setMerchantId] = useState<string | null>(null);
+  const [canManage, setCanManage] = useState(false);
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -65,14 +66,15 @@ export default function ProductsScreen() {
   const load = useCallback(async () => {
     if (!user?.id) return;
     try {
-      const m = await merchantService.getMyMerchant(user.id);
-      if (!m) {
+      const ctx = await merchantService.getMyStoreContext(user.id);
+      if (!ctx.merchant) {
         setMerchantId(null);
         setProducts([]);
         return;
       }
-      setMerchantId(m.id);
-      const list = await productService.listAllByMerchant(m.id);
+      setMerchantId(ctx.merchant.id);
+      setCanManage(ctx.isOwner || (ctx.staff?.can_manage_products ?? false));
+      const list = await productService.listAllByMerchant(ctx.merchant.id);
       setProducts(list);
     } catch (e) {
       console.error("Load products:", e);
@@ -91,14 +93,12 @@ export default function ProductsScreen() {
     load();
   };
 
-  // ============ Search ============
   const filtered = useMemo(() => {
     if (!search.trim()) return products;
     const q = search.trim().toLowerCase();
     return products.filter((p) => p.name.toLowerCase().includes(q));
   }, [products, search]);
 
-  // ============ Toggle available ============
   const toggleAvailable = async (p: Product) => {
     try {
       const updated = await productService.toggleAvailable(
@@ -112,7 +112,6 @@ export default function ProductsScreen() {
     }
   };
 
-  // ============ Delete ============
   const confirmDelete = (p: Product) => {
     showConfirm(
       "حذف المنتج",
@@ -130,7 +129,6 @@ export default function ProductsScreen() {
     );
   };
 
-  // ============ Image Picker (✅ محدّث) ============
   const pickImage = async () => {
     const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!perm.granted) {
@@ -138,7 +136,7 @@ export default function ProductsScreen() {
       return;
     }
     const res = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ["images"], // ✅ الصيغة الجديدة
+      mediaTypes: ["images"],
       allowsEditing: true,
       aspect: [1, 1],
       quality: 0.7,
@@ -148,7 +146,6 @@ export default function ProductsScreen() {
     }
   };
 
-  // ============ Open Modal ============
   const openCreate = () => {
     setDraft(EMPTY_DRAFT);
     setPickedImage(null);
@@ -168,10 +165,8 @@ export default function ProductsScreen() {
     setModalVisible(true);
   };
 
-  // ============ Save ============
   const handleSave = async () => {
     if (!merchantId || !user?.id) return;
-
     const name = draft.name.trim();
     const price = Number(draft.price);
 
@@ -229,10 +224,8 @@ export default function ProductsScreen() {
     }
   };
 
-  // ============ Loading ============
   if (loading) return <AppLoader message="جاري التحميل..." />;
 
-  // ============ No merchant ============
   if (!merchantId) {
     return (
       <ScreenContainer edges={["top"]}>
@@ -244,7 +237,24 @@ export default function ProductsScreen() {
     );
   }
 
-  // ============ Main ============
+  if (!canManage) {
+    return (
+      <ScreenContainer edges={["top"]}>
+        <AppEmptyState
+          title="لا توجد صلاحية"
+          message="ليس لديك صلاحية إدارة المنتجات. تواصل مع صاحب المتجر."
+          icon={
+            <Ionicons
+              name="lock-closed-outline"
+              size={64}
+              color={Colors.text.muted}
+            />
+          }
+        />
+      </ScreenContainer>
+    );
+  }
+
   return (
     <ScreenContainer scroll={false} padded={false} edges={["top"]}>
       <View style={styles.header}>
@@ -370,7 +380,6 @@ export default function ProductsScreen() {
         <Ionicons name="add" size={28} color="#fff" />
       </Pressable>
 
-      {/* ============ Modal ============ */}
       <Modal
         visible={modalVisible}
         animationType="slide"
@@ -510,14 +519,8 @@ const styles = StyleSheet.create({
     fontWeight: FontWeight.bold,
     color: Colors.text.primary,
   },
-  headerCount: {
-    fontSize: FontSize.sm,
-    color: Colors.text.muted,
-  },
-  searchWrap: {
-    paddingHorizontal: Spacing.lg,
-    paddingTop: Spacing.md,
-  },
+  headerCount: { fontSize: FontSize.sm, color: Colors.text.muted },
+  searchWrap: { paddingHorizontal: Spacing.lg, paddingTop: Spacing.md },
   searchBox: {
     flexDirection: "row-reverse",
     alignItems: "center",
@@ -601,9 +604,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  iconBtnDanger: {
-    backgroundColor: Colors.status.errorSoft,
-  },
+  iconBtnDanger: { backgroundColor: Colors.status.errorSoft },
   fab: {
     position: "absolute",
     bottom: 24,

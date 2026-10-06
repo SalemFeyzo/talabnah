@@ -1,7 +1,7 @@
 // src/app/(client)/settings.tsx
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import React, { useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Pressable,
@@ -19,6 +19,7 @@ import { Radius, Shadow, Spacing } from "@/constants/spacing";
 import { FontSize, FontWeight } from "@/constants/typography";
 import { useAuth } from "@/context/AuthContext";
 import { useViewMode } from "@/context/ViewModeContext";
+import { driverService } from "@/services/driver";
 import { merchantService } from "@/services/merchant";
 import { showAlert, showConfirm } from "@/utils/confirm";
 import { supabase } from "@/utils/supabase";
@@ -33,8 +34,44 @@ export default function ClientSettingsScreen() {
   const [saving, setSaving] = useState(false);
   const [notifications, setNotifications] = useState(true);
   const [switching, setSwitching] = useState(false);
+  const [switchingDriver, setSwitchingDriver] = useState(false);
 
-  // ============ حفظ البيانات الشخصية ============
+  // سياق الموظف
+  const [staffContext, setStaffContext] = useState<{
+    merchantName: string;
+    jobTitle: string;
+    can_manage_products: boolean;
+    can_manage_orders: boolean;
+  } | null>(null);
+  const [loadingStaff, setLoadingStaff] = useState(true);
+
+  // ============ تحقق: هل المستخدم موظف؟ ============
+  const checkStaff = useCallback(async () => {
+    if (!user?.id) return;
+    try {
+      const ctx = await merchantService.getMyStoreContext(user.id);
+      if (!ctx.isOwner && ctx.staff && ctx.merchant) {
+        setStaffContext({
+          merchantName: ctx.merchant.store_name,
+          jobTitle: ctx.staff.job_title,
+          can_manage_products: ctx.staff.can_manage_products,
+          can_manage_orders: ctx.staff.can_manage_orders,
+        });
+      } else {
+        setStaffContext(null);
+      }
+    } catch (e) {
+      console.error("Check staff:", e);
+    } finally {
+      setLoadingStaff(false);
+    }
+  }, [user?.id]);
+
+  useEffect(() => {
+    checkStaff();
+  }, [checkStaff]);
+
+  // ============ حفظ البيانات ============
   const handleUpdate = async () => {
     if (!user?.id) return;
     if (!fullName.trim()) {
@@ -43,11 +80,15 @@ export default function ClientSettingsScreen() {
     }
     setSaving(true);
     try {
+      const cleanPhone = phone.trim();
+      const phoneValue =
+        !cleanPhone || cleanPhone.includes("@") ? undefined : cleanPhone;
+
       const { error } = await supabase
         .from("profiles")
         .update({
           full_name: fullName.trim(),
-          phone: phone.trim(),
+          phone: phoneValue,
         })
         .eq("id", user.id);
       if (error) throw error;
@@ -60,13 +101,18 @@ export default function ClientSettingsScreen() {
     }
   };
 
+  // ============ إدارة المتجر (للموظف) ============
+  const handleManageStore = async () => {
+    await setViewMode("merchant");
+    router.replace("/(merchant)");
+  };
+
   // ============ التبديل إلى تاجر ============
   const handleSwitchToMerchant = async () => {
     if (!user?.id) return;
     setSwitching(true);
     try {
       const merchant = await merchantService.getMyMerchant(user.id);
-
       if (merchant) {
         await merchantService.promoteToMerchant(user.id);
         await refreshProfile();
@@ -76,10 +122,30 @@ export default function ClientSettingsScreen() {
         router.push("/(merchant)/setup-store" as any);
       }
     } catch (e: any) {
-      console.error("Switch to merchant:", e);
       showAlert("خطأ", e?.message ?? "تعذّر التبديل");
     } finally {
       setSwitching(false);
+    }
+  };
+
+  // ============ التبديل إلى كابتن ============
+  const handleSwitchToDriver = async () => {
+    if (!user?.id) return;
+    setSwitchingDriver(true);
+    try {
+      const driver = await driverService.getMyDriver(user.id);
+      if (driver) {
+        await driverService.promoteToDriver(user.id);
+        await refreshProfile();
+        await setViewMode("driver");
+        router.replace("/(driver)");
+      } else {
+        router.push("/(driver)/setup-driver" as any);
+      }
+    } catch (e: any) {
+      showAlert("خطأ", e?.message ?? "تعذّر التبديل");
+    } finally {
+      setSwitchingDriver(false);
     }
   };
 
@@ -135,7 +201,6 @@ export default function ClientSettingsScreen() {
         contentContainerStyle={styles.scroll}
         showsVerticalScrollIndicator={false}
       >
-        {/* Header */}
         <View style={styles.header}>
           <Text style={styles.title}>حسابي</Text>
           <Pressable style={styles.iconBtn}>
@@ -155,6 +220,63 @@ export default function ClientSettingsScreen() {
           <Text style={styles.profileName}>{fullName || "مستخدم"}</Text>
           <Text style={styles.profileEmail}>{user?.email}</Text>
         </View>
+
+        {/* ⭐ إدارة المتجر (تظهر فقط للموظف) */}
+        {!loadingStaff && staffContext ? (
+          <View style={styles.staffBanner}>
+            <View style={styles.staffHeader}>
+              <View style={styles.staffIconWrap}>
+                <Ionicons
+                  name="shield-checkmark"
+                  size={22}
+                  color={Colors.gold.main}
+                />
+              </View>
+              <View style={{ flex: 1, alignItems: "flex-end" }}>
+                <Text style={styles.staffTitle}>أنت موظف في متجر</Text>
+                <Text style={styles.staffStore} numberOfLines={1}>
+                  {staffContext.merchantName}
+                </Text>
+                <Text style={styles.staffJob}>{staffContext.jobTitle}</Text>
+              </View>
+            </View>
+
+            <View style={styles.permsRow}>
+              {staffContext.can_manage_products ? (
+                <View style={styles.permChip}>
+                  <Ionicons
+                    name="cube-outline"
+                    size={12}
+                    color={Colors.primary.main}
+                  />
+                  <Text style={styles.permChipText}>إدارة المنتجات</Text>
+                </View>
+              ) : null}
+              {staffContext.can_manage_orders ? (
+                <View style={styles.permChip}>
+                  <Ionicons
+                    name="receipt-outline"
+                    size={12}
+                    color={Colors.primary.main}
+                  />
+                  <Text style={styles.permChipText}>إدارة الطلبات</Text>
+                </View>
+              ) : null}
+            </View>
+
+            <Pressable
+              onPress={handleManageStore}
+              style={({ pressed }) => [
+                styles.manageStoreBtn,
+                pressed && styles.pressed,
+              ]}
+            >
+              <Ionicons name="storefront" size={18} color="#fff" />
+              <Text style={styles.manageStoreText}>إدارة المتجر</Text>
+              <Ionicons name="chevron-back" size={18} color="#fff" />
+            </Pressable>
+          </View>
+        ) : null}
 
         {/* Personal Data */}
         <SectionCard title="البيانات الشخصية" icon="person-outline">
@@ -187,53 +309,69 @@ export default function ClientSettingsScreen() {
           />
         </SectionCard>
 
-        {/* Merchant Switch */}
-        <SectionCard title="الأنشطة التجارية" icon="storefront-outline">
-          <Pressable
-            onPress={handleSwitchToMerchant}
-            disabled={switching}
-            style={({ pressed }) => [
-              styles.actionRow,
-              pressed && styles.pressed,
-            ]}
-          >
-            <View style={styles.actionIconBox}>
-              {switching ? (
-                <ActivityIndicator color={Colors.gold.dark} />
-              ) : (
-                <Ionicons
-                  name="storefront"
-                  size={20}
-                  color={Colors.gold.dark}
-                />
-              )}
-            </View>
-            <View style={{ flex: 1, alignItems: "flex-end" }}>
-              <Text style={styles.actionTitle}>التبديل إلى التاجر</Text>
-              <Text style={styles.actionSub}>إدارة متجرك ومنتجاتك وطلباتك</Text>
-            </View>
-            <Ionicons name="chevron-back" size={18} color={Colors.gold.dark} />
-          </Pressable>
-
-          <Pressable
-            onPress={() => showAlert("قريباً", "التسجيل كمندوب توصيل قريباً")}
-            style={({ pressed }) => [
-              styles.actionRow,
-              pressed && styles.pressed,
-            ]}
-          >
-            <View
-              style={[styles.actionIconBox, { backgroundColor: "#FEF3C720" }]}
+        {/* Merchant & Driver Switch — تظهر فقط إذا لم يكن موظفاً */}
+        {!staffContext ? (
+          <SectionCard title="الأنشطة التجارية" icon="storefront-outline">
+            <Pressable
+              onPress={handleSwitchToMerchant}
+              disabled={switching}
+              style={({ pressed }) => [
+                styles.actionRow,
+                pressed && styles.pressed,
+              ]}
             >
-              <Ionicons name="bicycle" size={20} color="#D97706" />
-            </View>
-            <View style={{ flex: 1, alignItems: "flex-end" }}>
-              <Text style={styles.actionTitle}>الانضمام كمندوب توصيل</Text>
-              <Text style={styles.actionSub}>قريباً</Text>
-            </View>
-            <Ionicons name="chevron-back" size={18} color="#D97706" />
-          </Pressable>
-        </SectionCard>
+              <View style={styles.actionIconBox}>
+                {switching ? (
+                  <ActivityIndicator color={Colors.gold.dark} />
+                ) : (
+                  <Ionicons
+                    name="storefront"
+                    size={20}
+                    color={Colors.gold.dark}
+                  />
+                )}
+              </View>
+              <View style={{ flex: 1, alignItems: "flex-end" }}>
+                <Text style={styles.actionTitle}>التبديل إلى التاجر</Text>
+                <Text style={styles.actionSub}>
+                  إدارة متجرك ومنتجاتك وطلباتك
+                </Text>
+              </View>
+              <Ionicons
+                name="chevron-back"
+                size={18}
+                color={Colors.gold.dark}
+              />
+            </Pressable>
+
+            <Pressable
+              onPress={handleSwitchToDriver}
+              disabled={switchingDriver}
+              style={({ pressed }) => [
+                styles.actionRow,
+                { backgroundColor: "#FEF3C720" },
+                pressed && styles.pressed,
+              ]}
+            >
+              <View
+                style={[styles.actionIconBox, { backgroundColor: "#FEF3C740" }]}
+              >
+                {switchingDriver ? (
+                  <ActivityIndicator color="#D97706" />
+                ) : (
+                  <Ionicons name="bicycle" size={20} color="#D97706" />
+                )}
+              </View>
+              <View style={{ flex: 1, alignItems: "flex-end" }}>
+                <Text style={styles.actionTitle}>التبديل إلى كابتن</Text>
+                <Text style={styles.actionSub}>
+                  توصيل الطلبات وتحقيق دخل إضافي
+                </Text>
+              </View>
+              <Ionicons name="chevron-back" size={18} color="#D97706" />
+            </Pressable>
+          </SectionCard>
+        ) : null}
 
         {/* Preferences */}
         <SectionCard title="التفضيلات والأمان" icon="shield-checkmark-outline">
@@ -389,6 +527,83 @@ const styles = StyleSheet.create({
     color: Colors.primary.soft,
     marginTop: 4,
   },
+  // Staff banner
+  staffBanner: {
+    backgroundColor: Colors.primary.main,
+    borderRadius: Radius.xl,
+    padding: Spacing.lg,
+    marginBottom: Spacing.lg,
+    borderWidth: 2,
+    borderColor: Colors.gold.main,
+    ...Shadow.lg,
+  },
+  staffHeader: {
+    flexDirection: "row-reverse",
+    alignItems: "center",
+    gap: Spacing.md,
+    marginBottom: Spacing.md,
+  },
+  staffIconWrap: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: "rgba(212,162,76,0.2)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  staffTitle: {
+    color: Colors.gold.main,
+    fontSize: FontSize.xs,
+    fontWeight: FontWeight.bold,
+    textAlign: "right",
+  },
+  staffStore: {
+    color: "#fff",
+    fontSize: FontSize.lg,
+    fontWeight: FontWeight.bold,
+    textAlign: "right",
+  },
+  staffJob: {
+    color: Colors.primary.soft,
+    fontSize: FontSize.sm,
+    textAlign: "right",
+    marginTop: 2,
+  },
+  permsRow: {
+    flexDirection: "row-reverse",
+    flexWrap: "wrap",
+    gap: Spacing.xs,
+    marginBottom: Spacing.md,
+  },
+  permChip: {
+    flexDirection: "row-reverse",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "rgba(255,255,255,0.15)",
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: 3,
+    borderRadius: Radius.full,
+  },
+  permChipText: {
+    color: Colors.primary.soft,
+    fontSize: 10,
+    fontWeight: FontWeight.semibold,
+  },
+  manageStoreBtn: {
+    flexDirection: "row-reverse",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: Spacing.sm,
+    backgroundColor: Colors.gold.main,
+    paddingVertical: Spacing.md,
+    borderRadius: Radius.lg,
+  },
+  manageStoreText: {
+    color: "#fff",
+    fontSize: FontSize.md,
+    fontWeight: FontWeight.bold,
+  },
+  // Regular sections
   section: { marginBottom: Spacing.lg },
   sectionHeader: {
     flexDirection: "row-reverse",

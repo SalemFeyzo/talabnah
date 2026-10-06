@@ -1,6 +1,5 @@
-// src/app/(merchant)/orders.tsx
+// src/app/(admin)/orders.tsx
 import { Ionicons } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   FlatList,
@@ -17,9 +16,7 @@ import { AppEmptyState, AppLoader, StatusBadge } from "@/components/ui";
 import { Colors } from "@/constants/colors";
 import { Radius, Shadow, Spacing } from "@/constants/spacing";
 import { FontSize, FontWeight } from "@/constants/typography";
-import { useAuth } from "@/context/AuthContext";
-import { merchantService } from "@/services/merchant";
-import { orderService } from "@/services/order";
+import { adminService } from "@/services/admin";
 import type { Order, OrderStatus } from "@/types";
 
 type Filter = "ALL" | OrderStatus;
@@ -33,29 +30,15 @@ const FILTERS: { key: Filter; label: string }[] = [
   { key: "DELIVERED", label: "تم التسليم" },
 ];
 
-export default function MerchantOrdersScreen() {
-  const router = useRouter();
-  const { user } = useAuth();
-
-  const [merchantId, setMerchantId] = useState<string | null>(null);
-  const [canManage, setCanManage] = useState(false);
+export default function AdminOrdersScreen() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [filter, setFilter] = useState<Filter>("ALL");
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
   const load = useCallback(async () => {
-    if (!user?.id) return;
     try {
-      const ctx = await merchantService.getMyStoreContext(user.id);
-      if (!ctx.merchant) {
-        setMerchantId(null);
-        setOrders([]);
-        return;
-      }
-      setMerchantId(ctx.merchant.id);
-      setCanManage(ctx.isOwner || (ctx.staff?.can_manage_orders ?? false));
-      const list = await orderService.listByMerchant(ctx.merchant.id);
+      const list = await adminService.listAllOrders();
       setOrders(list);
     } catch (e) {
       console.error("Load orders:", e);
@@ -63,29 +46,25 @@ export default function MerchantOrdersScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [user?.id]);
+  }, []);
 
   useEffect(() => {
     load();
   }, [load]);
 
   useEffect(() => {
-    if (!merchantId) return;
-
     let unsub: (() => void) | null = null;
     let mounted = true;
-
     const t = setTimeout(() => {
       if (!mounted) return;
-      unsub = orderService.subscribeMerchantOrders(merchantId, load);
+      unsub = adminService.subscribeAllOrders(load);
     }, 0);
-
     return () => {
       mounted = false;
       clearTimeout(t);
       unsub?.();
     };
-  }, [merchantId, load]);
+  }, [load]);
 
   const onRefresh = () => {
     setRefreshing(true);
@@ -107,40 +86,11 @@ export default function MerchantOrdersScreen() {
 
   if (loading) return <AppLoader message="جاري التحميل..." />;
 
-  if (!merchantId) {
-    return (
-      <ScreenContainer edges={["top"]}>
-        <AppEmptyState
-          title="لا يوجد متجر"
-          message="أنشئ متجرك أولاً لعرض الطلبات."
-        />
-      </ScreenContainer>
-    );
-  }
-
-  if (!canManage) {
-    return (
-      <ScreenContainer edges={["top"]}>
-        <AppEmptyState
-          title="لا توجد صلاحية"
-          message="ليس لديك صلاحية إدارة الطلبات."
-          icon={
-            <Ionicons
-              name="lock-closed-outline"
-              size={64}
-              color={Colors.text.muted}
-            />
-          }
-        />
-      </ScreenContainer>
-    );
-  }
-
   return (
     <ScreenContainer scroll={false} padded={false} edges={["top"]}>
       <View style={styles.header}>
         <Text style={styles.headerTitle}>الطلبات</Text>
-        <Text style={styles.headerCount}>{orders.length} طلب</Text>
+        <Text style={styles.headerCount}>{orders.length}</Text>
       </View>
 
       <View style={styles.filtersWrap}>
@@ -191,19 +141,51 @@ export default function MerchantOrdersScreen() {
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
         }
         renderItem={({ item }) => (
-          <OrderRow
-            order={item}
-            onPress={() => router.push(`/(merchant)/order/${item.id}` as any)}
-          />
+          <View style={styles.card}>
+            <View style={styles.cardHeader}>
+              <View style={styles.orderNumWrap}>
+                <Ionicons
+                  name="receipt-outline"
+                  size={16}
+                  color={Colors.primary.main}
+                />
+                <Text style={styles.orderNum}>
+                  #{item.id.slice(0, 6).toUpperCase()}
+                </Text>
+              </View>
+              <StatusBadge status={item.status} />
+            </View>
+
+            <View style={styles.divider} />
+
+            <View style={styles.row}>
+              <View style={styles.infoRow}>
+                <Ionicons
+                  name="time-outline"
+                  size={14}
+                  color={Colors.text.muted}
+                />
+                <Text style={styles.muted}>
+                  {new Date(item.created_at).toLocaleString("ar-EG", {
+                    day: "numeric",
+                    month: "short",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}
+                </Text>
+              </View>
+              <View style={styles.totalWrap}>
+                <Text style={styles.totalLabel}>الإجمالي</Text>
+                <Text style={styles.totalValue}>
+                  {Number(item.total_amount).toFixed(2)} ل.س
+                </Text>
+              </View>
+            </View>
+          </View>
         )}
         ListEmptyComponent={
           <AppEmptyState
             title="لا توجد طلبات"
-            message={
-              filter === "ALL"
-                ? "لم يستقبل متجرك أي طلب بعد."
-                : "لا توجد طلبات بهذه الحالة."
-            }
             icon={
               <Ionicons
                 name="receipt-outline"
@@ -215,53 +197,6 @@ export default function MerchantOrdersScreen() {
         }
       />
     </ScreenContainer>
-  );
-}
-
-function OrderRow({ order, onPress }: { order: Order; onPress: () => void }) {
-  const date = new Date(order.created_at);
-  const dateStr = date.toLocaleString("ar-EG", {
-    day: "numeric",
-    month: "short",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-
-  return (
-    <Pressable
-      onPress={onPress}
-      style={({ pressed }) => [styles.card, pressed && styles.pressed]}
-    >
-      <View style={styles.cardHeader}>
-        <View style={styles.orderNumWrap}>
-          <Ionicons
-            name="receipt-outline"
-            size={16}
-            color={Colors.primary.main}
-          />
-          <Text style={styles.orderNum}>
-            #{order.id.slice(0, 6).toUpperCase()}
-          </Text>
-        </View>
-        <StatusBadge status={order.status} />
-      </View>
-
-      <View style={styles.cardDivider} />
-
-      <View style={styles.cardFooter}>
-        <View style={styles.dateWrap}>
-          <Ionicons name="time-outline" size={14} color={Colors.text.muted} />
-          <Text style={styles.date}>{dateStr}</Text>
-        </View>
-
-        <View style={styles.totalWrap}>
-          <Text style={styles.totalLabel}>الإجمالي</Text>
-          <Text style={styles.total}>
-            {Number(order.total_amount).toFixed(2)} ل.س
-          </Text>
-        </View>
-      </View>
-    </Pressable>
   );
 }
 
@@ -339,7 +274,6 @@ const styles = StyleSheet.create({
     borderColor: Colors.border.light,
     ...Shadow.sm,
   },
-  pressed: { opacity: 0.9 },
   cardHeader: {
     flexDirection: "row-reverse",
     alignItems: "center",
@@ -355,29 +289,29 @@ const styles = StyleSheet.create({
     fontWeight: FontWeight.bold,
     color: Colors.text.primary,
   },
-  cardDivider: {
+  divider: {
     height: 1,
     backgroundColor: Colors.border.light,
     marginVertical: Spacing.sm,
   },
-  cardFooter: {
+  row: {
     flexDirection: "row-reverse",
     alignItems: "center",
     justifyContent: "space-between",
   },
-  dateWrap: {
+  infoRow: {
     flexDirection: "row-reverse",
     alignItems: "center",
     gap: 4,
   },
-  date: { fontSize: FontSize.xs, color: Colors.text.muted },
+  muted: { fontSize: FontSize.xs, color: Colors.text.muted },
   totalWrap: { alignItems: "flex-start" },
   totalLabel: {
     fontSize: FontSize.xs,
     color: Colors.text.muted,
     textAlign: "right",
   },
-  total: {
+  totalValue: {
     fontSize: FontSize.md,
     fontWeight: FontWeight.bold,
     color: Colors.gold.dark,
